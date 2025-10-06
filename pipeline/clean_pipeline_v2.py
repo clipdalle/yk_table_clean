@@ -53,7 +53,11 @@ def parse_batch(batch_df: pd.DataFrame) -> List[Dict]:
         known_names=json.dumps(known_names, ensure_ascii=False, indent=2)
     )
 
-    with open('test_prompt.txt', 'w', encoding='utf-8') as f:
+    # 写入temp目录而不是当前目录
+    import tempfile
+    temp_dir = tempfile.gettempdir()
+    test_prompt_path = os.path.join(temp_dir, 'test_prompt.txt')
+    with open(test_prompt_path, 'w', encoding='utf-8') as f:
         f.write(prompt)
     
     try:
@@ -447,6 +451,12 @@ def process_one_file(excel_path: str, output_path: str, date_str_from_file: str,
         output_path: 最终着色文件路径（必填）。
     """
     output_dir = Path(output_path).parent
+    # 确保只在temp目录中创建目录
+    import tempfile
+    temp_dir = tempfile.gettempdir()
+    if not str(output_dir).startswith(temp_dir):
+        output_dir = Path(tempfile.mkdtemp())
+        output_path = str(output_dir / Path(output_path).name)
     output_dir.mkdir(exist_ok=True)
     print("="*60)
     print("排麦人员 & 主持人员字段清洗 Pipeline")
