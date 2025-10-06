@@ -28,9 +28,8 @@ class SiliconModel:
         self.api_key = api_key
         self.model = model
         self.endpoint = 'https://api.siliconflow.cn/v1/chat/completions'
-        self.temperature = TEMPERATURE
 
-    def get_completion(self, prompt: str) -> str:
+    def get_completion(self, prompt: str, temperature: float = TEMPERATURE) -> str:
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
@@ -40,7 +39,7 @@ class SiliconModel:
             'messages': [
                 {'role': 'user', 'content': prompt}
             ],
-            'temperature': self.temperature,
+            'temperature': temperature,
             'stream': False,
         }
 
@@ -68,6 +67,6 @@ class SiliconModel:
 
 if __name__ == '__main__':
     client = SiliconModel()
-    print(client.get_completion('用一句话介绍什么是机器学习'))
+    print(client.get_completion('用一句话介绍什么是机器学习', temperature=0.1))
 
 

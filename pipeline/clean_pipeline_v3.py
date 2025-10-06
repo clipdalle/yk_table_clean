@@ -34,6 +34,7 @@ print(f"人名清单: {known_names_select[:10]}..." if len(known_names_select) >
 
 
 # ========== 核心函数 ==========
+import traceback 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 def parse_batch(batch_df: pd.DataFrame) -> List[Dict]:
@@ -95,7 +96,7 @@ def parse_batch(batch_df: pd.DataFrame) -> List[Dict]:
     
     except Exception as e:
         # 批量解析失败，返回默认值
-        print(f"\n⚠️ 批量解析失败: {e}")
+        print(f"\n⚠️ 批量解析失败: {traceback.format_exc()}")
         print(f"\n原始输入数据:")
         print(json.dumps(batch_data, ensure_ascii=False, indent=2))
         print(f"\nLLM 响应:")
@@ -164,6 +165,7 @@ def batch_parse_fields(
             
         # 2) 逐行写回
         for result in batch_results:
+            print(result)
             idx = result.get('行号')
             host_data = result['主持']
             paimai_data = result['排麦']
