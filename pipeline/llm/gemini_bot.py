@@ -7,7 +7,7 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from CONFIG import GOOGLE_API_KEY, get_google_api_key
+from global_config import GOOGLE_API_KEY, get_google_api_key
 from google import genai
 
 

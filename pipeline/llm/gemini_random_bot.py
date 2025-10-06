@@ -11,12 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from typing import Optional
 from google import genai
 
-try:
-    from CONFIG import get_google_api_key
-except ImportError:
-    # 如果无法导入CONFIG，使用环境变量
-    def get_google_api_key():
-        return os.getenv('GOOGLE_API_KEY', '')
+from global_config import get_google_api_key
 
 
 class GeminiRandomClient:

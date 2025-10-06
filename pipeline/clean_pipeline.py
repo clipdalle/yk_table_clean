@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.llm.llm_client import _get_client
 from pipeline.prompts import PROMPT_BATCH
-from CONFIG import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, HALL_FILTER, COLS_CONFIG
+from global_config import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, HALL_FILTER, COLS_CONFIG
 
 # （已弃用的单文件输出常量已移除，流程改为按 data 目录批量处理并只产出最终着色文件）
 
@@ -522,7 +522,7 @@ def get_date_str_from_text(text):
 
 model_client = _get_client(model_name=CURRENT_MODEL)
 
-from CONFIG import BATCH_SIZE
+from global_config import BATCH_SIZE
 
 
 

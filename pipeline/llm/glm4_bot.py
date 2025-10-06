@@ -13,11 +13,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-try:
-    from CONFIG import GLM4_API_KEY
-except ImportError:
-    # 如果无法导入CONFIG，使用环境变量
-    GLM4_API_KEY = os.getenv('GLM4_API_KEY', '')
+from global_config import GLM4_API_KEY
 
 
 class GLM4Client:

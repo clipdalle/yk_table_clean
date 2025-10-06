@@ -19,8 +19,7 @@ import json
 import requests
 from typing import List, Dict
 
-from CONFIG import SILICONFLOW_API_KEY, SILICONFLOW_MODEL, TIMEOUT
- 
+from global_config import SILICONFLOW_API_KEY, SILICONFLOW_MODEL, TIMEOUT
 
 class SiliconModel:
     """SiliconFlow DeepSeek V3 API 客户端"""

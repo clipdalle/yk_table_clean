@@ -8,11 +8,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-try:
-    from CONFIG import CURRENT_MODEL
-except ImportError:
-    # 如果无法导入CONFIG，使用默认值
-    CURRENT_MODEL = 'silicon_qwen3_80B'
+from global_config import CURRENT_MODEL
 
 
 # 全局客户端实例（懒加载）
