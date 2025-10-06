@@ -358,7 +358,7 @@
                 if (data.success) {
                     displayResults(data);
                 } else {
-                    displayError(data.error);
+                    displayError(data.error, data.details, data.type);
                 }
             })
             .catch(error => {

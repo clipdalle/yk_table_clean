@@ -156,15 +156,7 @@ def batch_parse_fields(
         print(f"处理批次 {batch_idx + 1}/{num_batches} (第 {start_idx+1}-{end_idx} 行)...", end='')
         batch_start_ts = time.time()
 
-        try:
-            # 1) LLM 批量解析
-            batch_results = parse_batch(batch_df)
-        except Exception as e:
-            elapsed = time.time() - batch_start_ts
-            print(f" ❌ 失败，用时 {elapsed:.2f}s")
-            print(f"   错误: {e}")
-            print(f"   该批次数据将使用默认值")
-
+        batch_results = parse_batch(batch_df)
             
         # 2) 逐行写回
         for result in batch_results:

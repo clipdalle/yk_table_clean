@@ -26,24 +26,6 @@ from pipeline.clean_pipeline_v3 import process_one_file, get_date_str_from_text
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # 用于 session
 
-# 全局错误处理器
-@app.errorhandler(Exception)
-def handle_exception(e):
-    import traceback
-    import sys
-    error_details = traceback.format_exc()
-    
-    # 强制输出到stderr，确保在Vercel dev中可见
-    print(f"❌ 全局错误: {str(e)}", file=sys.stderr)
-    print(f"详细错误信息:\n{error_details}", file=sys.stderr)
-    sys.stderr.flush()
-    
-    # 同时输出到stdout
-    print(f"❌ 全局错误: {str(e)}")
-    print(f"详细错误信息:\n{error_details}")
-    sys.stdout.flush()
-    
-    return jsonify({'error': f'服务器错误: {str(e)}'}), 500
 
 # 初始化Vercel Blob
 BLOB_READ_WRITE_TOKEN = 'vercel_blob_rw_UDHA4kmifSvG3WQk_CC7V5VsRXmouv2ag9gI4EQU65DEoVR'
@@ -103,16 +85,13 @@ def process_with_timeout(excel_path, output_path, date_str_from_file, timeout_se
     result = {'success': False, 'error': None}
     
     def target():
-        try:
-            process_one_file(
-                excel_path=excel_path,
-                output_path=output_path,
-                date_str_from_file=date_str_from_file,
-                STRICT_DATE_FILTER=False
-            )
-            result['success'] = True
-        except Exception as e:
-            result['error'] = str(e)
+        process_one_file(
+            excel_path=excel_path,
+            output_path=output_path,
+            date_str_from_file=date_str_from_file,
+            STRICT_DATE_FILTER=False
+        )
+        result['success'] = True
     
     thread = threading.Thread(target=target)
     thread.daemon = True
@@ -206,12 +185,6 @@ def upload_files():
         
         file_base64 = base64.b64encode(file_content).decode('utf-8')
         
-        # 清理临时文件
-        try:
-            os.unlink(output_path)
-            print(f"🗑️ 已清理临时文件: {output_path}")
-        except:
-            pass
 
         output_filename = Path(excel_file.filename).with_suffix('.cleaned.xlsx').name
         
@@ -231,12 +204,10 @@ def upload_files():
         # 强制输出到stderr，确保在Vercel dev中可见
         print(f"❌ 处理失败: {str(e)}", file=sys.stderr)
         print(f"详细错误信息:\n{error_details}", file=sys.stderr)
-        sys.stderr.flush()
         
         # 同时输出到stdout
         print(f"❌ 处理失败: {str(e)}")
         print(f"详细错误信息:\n{error_details}")
-        sys.stdout.flush()
         
         return jsonify({'error': f'处理失败: {str(e)}'}), 500
 
