@@ -464,7 +464,7 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str):
         ws.column_dimensions[stats_col_3].width = 15
 
     # 应用列着色（直接在内存中操作）
-    from pipeline.coloring import apply_column_colors_from_config_memory
+    from pipeline.coloring import apply_column_colors_from_config_memory, apply_color_by_value_memory
     apply_column_colors_from_config_memory(ws, COLS_CONFIG)
 
     # 应用值着色（直接在内存中操作）

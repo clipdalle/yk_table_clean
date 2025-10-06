@@ -12,7 +12,10 @@ from pathlib import Path
 import signal
 import threading
 import time
-from vercel_blob import BlobStore
+try:
+    from vercel_blob import BlobStore
+except ImportError:
+    BlobStore = None
 
 # 添加 pipeline 模块路径
 sys.path.append('pipeline')
@@ -24,7 +27,12 @@ app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # 用于 session
 
 # 初始化Vercel Blob
-blob_store = BlobStore()
+import os
+if BlobStore and os.getenv('VERCEL_BLOB_TOKEN'):
+    blob_store = BlobStore()
+else:
+    print("⚠️  Vercel Blob not available, using local file storage for development")
+    blob_store = None
 
 # 配置
 UPLOAD_FOLDER = tempfile.gettempdir()
@@ -159,27 +167,67 @@ def upload_files():
         # 处理 NaN 值，转换为 None 以便 JSON 序列化
         result_df = result_df.fillna('')
         
-        # 上传处理结果到Vercel Blob
-        import uuid
-        file_id = str(uuid.uuid4())
-        blob_filename = f'processed_{file_id}.xlsx'
-        
-        # 读取文件内容
-        with open(output_path, 'rb') as f:
-            file_content = f.read()
-        
-        # 上传到Vercel Blob
-        blob_url = blob_store.put(blob_filename, file_content)
-        
-        return jsonify({
-            'success': True,
-            'message': f'处理完成！共处理 {len(result_df)} 条记录',
-            'download_url': blob_url,
-            'file_id': file_id
-        })
+        # 根据环境选择存储方式
+        if blob_store:
+            # 生产环境：使用Vercel Blob
+            import uuid
+            file_id = str(uuid.uuid4())
+            blob_filename = f'processed_{file_id}.xlsx'
+            
+            # 读取文件内容
+            with open(output_path, 'rb') as f:
+                file_content = f.read()
+            
+            # 上传到Vercel Blob
+            blob_url = blob_store.put(blob_filename, file_content)
+            
+            return jsonify({
+                'success': True,
+                'message': f'处理完成！共处理 {len(result_df)} 条记录',
+                'download_url': blob_url,
+                'file_id': file_id
+            })
+        else:
+            # 本地开发：使用本地文件存储
+            import uuid
+            file_id = str(uuid.uuid4())
+            local_filename = f'processed_{file_id}.xlsx'
+            
+            # 将文件复制到static目录（如果存在）
+            import shutil
+            static_dir = os.path.join(os.path.dirname(__file__), 'static')
+            if not os.path.exists(static_dir):
+                os.makedirs(static_dir)
+            
+            local_path = os.path.join(static_dir, local_filename)
+            shutil.copy2(output_path, local_path)
+            
+            return jsonify({
+                'success': True,
+                'message': f'处理完成！共处理 {len(result_df)} 条记录（本地开发模式）',
+                'download_url': f'/static/{local_filename}',
+                'file_id': file_id
+            })
         
     except Exception as e:
         return jsonify({'error': f'处理失败: {str(e)}'}), 500
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    """下载处理结果文件"""
+    try:
+        # 从 session 中获取临时目录
+        temp_dir = session.get('temp_dir')
+        if not temp_dir:
+            return jsonify({'error': '会话已过期，请重新上传文件'}), 404
+        
+        file_path = os.path.join(temp_dir, filename)
+        if os.path.exists(file_path):
+            return send_file(file_path, as_attachment=True)
+        else:
+            return jsonify({'error': '文件不存在'}), 404
+    except Exception as e:
+        return jsonify({'error': f'下载失败: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

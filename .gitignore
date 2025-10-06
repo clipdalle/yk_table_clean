@@ -29,4 +29,17 @@ CONFIG.py
 # Excel 临时文件
 ~$*.xlsx
 ~$*.xls
+
+# Vercel
+.vercel/
+
+# 测试数据目录
+daily_data_*/
+data/
+output/
+static/
+
+# 临时文件
+*.tmp
+*.log
 .vercel
