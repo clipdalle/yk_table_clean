@@ -363,7 +363,7 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str):
         df: 包含解析结果的数据框
         output_path: 输出文件路径
     """
-    from openpyxl import Workbook
+    from openpyxl import Workbook, load_workbook
     from openpyxl.utils import get_column_letter
     from openpyxl.styles import PatternFill, Font, Alignment
     import io
@@ -374,14 +374,13 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str):
     final_col_order = col_order + remaining_cols
     df_sorted = df[final_col_order]
 
-    # 直接在内存中创建工作簿，避免创建中间文件
-    wb = Workbook()
-    ws = wb.active
+    # 保存第一步：清洗后的数据
+    path_step1 = output_path.replace('.xlsx', '.step1_clean_table.xlsx')
+    df_sorted.to_excel(path_step1, index=False)
     
-    # 写入数据到工作表
-    for r_idx, row in enumerate(df_sorted.itertuples(index=False), 1):
-        for c_idx, value in enumerate(row, 1):
-            ws.cell(row=r_idx, column=c_idx, value=value)
+    # 加载工作簿
+    wb = load_workbook(path_step1)
+    ws = wb.active
 
     # 找到相关列（用于右侧统计区）
     headers = [cell.value for cell in ws[1]]
@@ -393,6 +392,9 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str):
             host_list_col = idx
         elif header == '排麦人员列表_AI解析':
             paimai_list_col = idx
+    
+    # 初始化sorted_names为空列表
+    sorted_names = []
     
     if host_list_col and paimai_list_col:
         host_col_letter = get_column_letter(host_list_col)
@@ -463,11 +465,16 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str):
         ws.column_dimensions[stats_col_2].width = 15
         ws.column_dimensions[stats_col_3].width = 15
 
-    # 应用列着色（直接在内存中操作）
-    from pipeline.coloring import apply_column_colors_from_config_memory, apply_color_by_value_memory
-    apply_column_colors_from_config_memory(ws, COLS_CONFIG)
+    # 保存
+    path_step2 = output_path.replace('.xlsx', '.add_stats_formula.xlsx')
+    wb.save(path_step2)
+    wb.close()
 
-    # 应用值着色（直接在内存中操作）
+    # 直接对最终文件进行着色（不生成额外文件）
+    path_step3 = output_path.replace('.xlsx', '.step3_nowarn.output.xlsx')
+    from pipeline.coloring import apply_column_colors_from_config
+    apply_column_colors_from_config(path_step2, COLS_CONFIG, path_step3)
+
     cell_config_list = [
         {'cell_value': 'medium', 'color_code': 'FF0000','mode': 'exact'},
         {'cell_value': 'low', 'color_code': 'FF0000','mode': 'exact'},
@@ -477,11 +484,7 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str):
         if normalize_ascii_lower(stat_name) not in known_names_select:
             cell_config_list.append({'cell_value': stat_name, 'color_code': 'FF0000','mode': 'contains_value'})
 
-    apply_color_by_value_memory(ws, cell_config_list)
-
-    # 直接保存最终文件
-    wb.save(output_path)
-    wb.close()
+    apply_color_by_value(path_step3, cell_config_list, output_path=output_path)
 
     print(f"✅ 已保存（带公式且着色）: {output_path}")
     print(f"   - 数据列: {len(headers)} 列")
@@ -490,6 +493,11 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str):
     print(f"   - 公式会自动统计每个人的主持次数和排麦次数")
     print(f"   - 修改人员列表后，统计会自动更新")
     print(f"   - 基于 CONFIG.COLS_CONFIG 配置着色")
+
+    #清理step1和step2中间文件
+    Path(path_step1).unlink()
+    Path(path_step2).unlink()
+    Path(path_step3).unlink()
 
 
 
@@ -538,7 +546,6 @@ def extract_chinese(text):
         raise ValueError(text)
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 def process_one_file(excel_path: str, output_path: str, date_str_from_file: str, STRICT_DATE_FILTER: bool = False):
     """处理单个 Excel 文件并输出最终着色文件
 

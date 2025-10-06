@@ -371,13 +371,17 @@
         function displayResults(data) {
             const resultsDiv = document.getElementById('results');
             
+            // 确保download_url是字符串
+            const downloadUrl = typeof data.download_url === 'string' ? data.download_url : '';
+            const filename = data.filename || 'processed_result.xlsx';
+            
             let html = `
                 <div class="success">
                     ✅ ${data.message}
                 </div>
                 
                 <div style="text-align: center; margin: 20px 0;">
-                    <a href="${data.download_url}" class="download-btn" download>
+                    <a href="${downloadUrl}" class="download-btn" download="${filename}">
                         📥 下载处理结果
                     </a>
                 </div>

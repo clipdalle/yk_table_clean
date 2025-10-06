@@ -14,12 +14,13 @@ import threading
 import time
 # Vercel Blob是可选的，生产环境会自动提供
 try:
-    from vercel_blob import BlobStore
+    from vercel_blob import blob_store as VercelBlobStore
 except ImportError:
-    BlobStore = None
+    VercelBlobStore = None
 
 # 添加 pipeline 模块路径
 sys.path.append('pipeline')
+import os 
 
 # 导入核心业务逻辑
 from pipeline.clean_pipeline_v3 import process_one_file, get_date_str_from_text
@@ -27,10 +28,31 @@ from pipeline.clean_pipeline_v3 import process_one_file, get_date_str_from_text
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # 用于 session
 
+# 全局错误处理器
+@app.errorhandler(Exception)
+def handle_exception(e):
+    import traceback
+    import sys
+    error_details = traceback.format_exc()
+    
+    # 强制输出到stderr，确保在Vercel dev中可见
+    print(f"❌ 全局错误: {str(e)}", file=sys.stderr)
+    print(f"详细错误信息:\n{error_details}", file=sys.stderr)
+    sys.stderr.flush()
+    
+    # 同时输出到stdout
+    print(f"❌ 全局错误: {str(e)}")
+    print(f"详细错误信息:\n{error_details}")
+    sys.stdout.flush()
+    
+    return jsonify({'error': f'服务器错误: {str(e)}'}), 500
+
 # 初始化Vercel Blob
+BLOB_READ_WRITE_TOKEN = 'vercel_blob_rw_UDHA4kmifSvG3WQk_CC7V5VsRXmouv2ag9gI4EQU65DEoVR'
+os.environ['BLOB_READ_WRITE_TOKEN'] = BLOB_READ_WRITE_TOKEN
 import os
-if BlobStore and os.getenv('VERCEL_BLOB_TOKEN'):
-    blob_store = BlobStore()
+if VercelBlobStore and BLOB_READ_WRITE_TOKEN:
+    blob_store = VercelBlobStore
 else:
     print("⚠️  Vercel Blob not available, using local file storage for development")
     blob_store = None
@@ -151,12 +173,19 @@ def upload_files():
                 }), 400
         
   
-        # 使用带超时的处理函数（120秒超时）
+        # 检测环境并设置合适的超时时间
+        is_vercel = os.getenv('VERCEL') == '1'
+        timeout_seconds = 60 if is_vercel else 120  # Vercel环境使用更短的超时
+        
+        print(f"🌍 环境检测: {'Vercel生产环境' if is_vercel else '本地开发环境'}")
+        print(f"⏱️ 超时设置: {timeout_seconds}秒")
+        
+        # 使用带超时的处理函数
         process_result = process_with_timeout(
             excel_path=excel_path,
             output_path=output_path,
             date_str_from_file=date_str_from_ui,
-            timeout_seconds=120
+            timeout_seconds=timeout_seconds
         )
         
         if not process_result['success']:
@@ -168,49 +197,49 @@ def upload_files():
         # 处理 NaN 值，转换为 None 以便 JSON 序列化
         result_df = result_df.fillna('')
         
-        # 根据环境选择存储方式
-        if blob_store:
-            # 生产环境：使用Vercel Blob
-            import uuid
-            file_id = str(uuid.uuid4())
-            blob_filename = f'processed_{file_id}.xlsx'
-            
-            # 读取文件内容
-            with open(output_path, 'rb') as f:
-                file_content = f.read()
-            
-            # 上传到Vercel Blob
-            blob_url = blob_store.put(blob_filename, file_content)
-            
-            return jsonify({
-                'success': True,
-                'message': f'处理完成！共处理 {len(result_df)} 条记录',
-                'download_url': blob_url,
-                'file_id': file_id
-            })
-        else:
-            # 本地开发：使用本地文件存储
-            import uuid
-            file_id = str(uuid.uuid4())
-            local_filename = f'processed_{file_id}.xlsx'
-            
-            # 将文件复制到static目录（如果存在）
-            import shutil
-            static_dir = os.path.join(os.path.dirname(__file__), 'static')
-            if not os.path.exists(static_dir):
-                os.makedirs(static_dir)
-            
-            local_path = os.path.join(static_dir, local_filename)
-            shutil.copy2(output_path, local_path)
-            
-            return jsonify({
-                'success': True,
-                'message': f'处理完成！共处理 {len(result_df)} 条记录（本地开发模式）',
-                'download_url': f'/static/{local_filename}',
-                'file_id': file_id
-            })
+        # 统一使用Base64方式（本地和生产环境都适用）
+        import uuid
+        import base64
+        file_id = str(uuid.uuid4())
+        
+        # 读取文件内容并转换为base64
+        with open(output_path, 'rb') as f:
+            file_content = f.read()
+        
+        file_base64 = base64.b64encode(file_content).decode('utf-8')
+        
+        # 清理临时文件
+        try:
+            os.unlink(output_path)
+            print(f"🗑️ 已清理临时文件: {output_path}")
+        except:
+            pass
+
+        output_filename = Path(excel_file.filename).with_suffix('.cleaned.xlsx').name
+        
+        return jsonify({
+            'success': True,
+            'message': f'处理完成！共处理 {len(result_df)} 条记录',
+            'download_url': f'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{file_base64}',
+            'file_id': file_id,
+            'filename': output_filename
+        })
         
     except Exception as e:
+        import traceback
+        import sys
+        error_details = traceback.format_exc()
+        
+        # 强制输出到stderr，确保在Vercel dev中可见
+        print(f"❌ 处理失败: {str(e)}", file=sys.stderr)
+        print(f"详细错误信息:\n{error_details}", file=sys.stderr)
+        sys.stderr.flush()
+        
+        # 同时输出到stdout
+        print(f"❌ 处理失败: {str(e)}")
+        print(f"详细错误信息:\n{error_details}")
+        sys.stdout.flush()
+        
         return jsonify({'error': f'处理失败: {str(e)}'}), 500
 
 @app.route('/download/<filename>')
