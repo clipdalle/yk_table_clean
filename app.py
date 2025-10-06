@@ -13,10 +13,8 @@ import signal
 import threading
 import time
 # Vercel Blob是可选的，生产环境会自动提供
-try:
-    from vercel_blob import blob_store as VercelBlobStore
-except ImportError:
-    VercelBlobStore = None
+
+from vercel_blob import blob_store as VercelBlobStore
 
 # 添加 pipeline 模块路径
 sys.path.append('pipeline')

@@ -154,9 +154,16 @@ def batch_parse_fields(
             print(f" ❌ 失败，用时 {elapsed:.2f}s")
             print(f"   错误: {e}")
             print(f"   该批次数据将使用默认值")
-
-            
-        # 2) 逐行写回
+            # 创建默认的batch_results
+            batch_results = []
+            for idx in range(len(batch_df)):
+                batch_results.append({
+                    '行号': batch_df.iloc[idx].name,
+                    '主持': {'人员列表': [], '错误': str(e)},
+                    '排麦': {'人员列表': [], '错误': str(e)},
+                    '标准化日期': '',
+                    '错误': str(e)
+                })
         for result in batch_results:
             idx = result.get('行号')
             host_data = result['主持']
