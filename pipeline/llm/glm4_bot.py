@@ -8,8 +8,16 @@ import json
 import sys
 import os
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from CONFIG import GLM4_API_KEY
+# 添加项目根目录到Python路径
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+try:
+    from CONFIG import GLM4_API_KEY
+except ImportError:
+    # 如果无法导入CONFIG，使用环境变量
+    GLM4_API_KEY = os.getenv('GLM4_API_KEY', '')
 
 
 class GLM4Client:

@@ -23,8 +23,7 @@ ENV/
 *.tmp
 *.log
 
-# 配置文件（包含 API Key）
-CONFIG.py
+
 
 # Excel 临时文件
 ~$*.xlsx
