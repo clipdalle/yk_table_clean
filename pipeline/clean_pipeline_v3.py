@@ -19,10 +19,13 @@ from pipeline.llm.llm_client import _get_client
 from pipeline.prompts_v3 import PROMPT_BATCH
 from global_config import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, HALL_FILTER, COLS_CONFIG
 
-# （已弃用的单文件输出常量已移除，流程改为按 data 目录批量处理并只产出最终着色文件）
 
-#known_names = ['00','Siri','九酱','余欢','余欢小野猫','关关','包包','卷柏','吧唧','呆呆','咕噜','哚哚','多多','娜娜','小妤','小榆','小野猫','幺幺','懒懒兔','撒娇','星若','晚晚','林绾绾','桃桃','沐沐','沫沫','泡芙','猫与花恋','王摆摆','璐璐','田螺','禾禾','米小米','红豆豆','花花','若可','茗萱']
 
+def get_temp_path(filename):
+    import tempfile
+    temp_dir = tempfile.gettempdir()
+    return os.path.join(temp_dir, filename)
+    
 # 读取已知人名清单
 with open('known_names_select.txt', 'r', encoding='utf-8') as f:
     known_names_select = f.read().splitlines()
@@ -65,9 +68,7 @@ def parse_batch(batch_df: pd.DataFrame) -> List[Dict]:
     )
 
     # 写入temp目录而不是当前目录
-    import tempfile
-    temp_dir = tempfile.gettempdir()
-    test_prompt_path = os.path.join(temp_dir, 'test_prompt.txt')
+    test_prompt_path = get_temp_path('test_prompt.txt')
     with open(test_prompt_path, 'w', encoding='utf-8') as f:
         f.write(prompt)
     
@@ -119,6 +120,12 @@ def parse_batch(batch_df: pd.DataFrame) -> List[Dict]:
         ]
 
 
+def further_split(names: List[str], split_char: str = '-') -> List[str]:
+    res = []
+    for name in names:
+        res.extend(name.split(split_char))
+    return res
+ 
 
 def batch_parse_fields(
     df: pd.DataFrame, 
@@ -170,8 +177,8 @@ def batch_parse_fields(
             paimai_data = result['排麦']
             error_msg = result.get('错误', '')
 
-            host_list = host_data['主持人员列表']
-            paimai_list = paimai_data['排麦人员列表']
+            host_list = further_split(host_data['主持人员列表'], split_char='-')
+            paimai_list = further_split(paimai_data['排麦人员列表'], split_char='-')
             lack_num = paimai_data['缺席人数']
             conf = paimai_data['置信度']
             row_standard_date_str = result['标准化日期']

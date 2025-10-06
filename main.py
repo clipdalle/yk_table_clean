@@ -47,7 +47,7 @@ def main():
             confirm = input("\n确认批量处理全部数据？(y/n): ").strip().lower()
             if confirm == 'y':
                 print("\n开始批量处理...")
-                from pipeline.clean_pipeline import main as clean_main
+                from deprecated.clean_pipeline import main as clean_main
                 clean_main()
                 input("\n按 Enter 返回菜单...")
         
