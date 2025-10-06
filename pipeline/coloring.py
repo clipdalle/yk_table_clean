@@ -87,3 +87,75 @@ def apply_column_colors_from_config(excel_path: str, config_dict: dict, output_p
 
     # 调用着色函数
     color_excel_columns(excel_path, column_colors, output_path)
+
+
+def apply_column_colors_from_config_memory(ws, config_dict: dict):
+    """
+    根据配置字典中的列颜色配置为工作表着色（内存版本）
+    
+    Args:
+        ws: openpyxl工作表对象
+        config_dict: 配置字典，包含列颜色映射
+    """
+    from openpyxl.styles import PatternFill
+    
+    # 从配置字典中提取列颜色映射
+    column_colors = {}
+    for item in config_dict:
+        col_name = item.get('col_name')
+        col_color = item.get('col_color')
+        if col_name and col_color and col_color not in ('default', None):
+            column_colors[col_name] = col_color
+    
+    # 获取表头行
+    headers = [cell.value for cell in ws[1]]
+    
+    # 应用着色
+    for col_name, color_code in column_colors.items():
+        if col_name in headers:
+            col_index = headers.index(col_name) + 1
+            col_letter = get_column_letter(col_index)
+            
+            fill = PatternFill(
+                start_color=color_code,
+                end_color=color_code,
+                fill_type='solid'
+            )
+            
+            # 对该列的所有单元格应用颜色
+            for row in range(1, ws.max_row + 1):
+                ws[f'{col_letter}{row}'].fill = fill
+
+
+def apply_color_by_value_memory(ws, value_color_mapping, match_mode='exact'):
+    """
+    根据值着色单元格（内存版本）
+    
+    Args:
+        ws: openpyxl工作表对象
+        value_color_mapping: 值颜色映射列表
+        match_mode: 匹配模式 'exact' 或 'contains_value'
+    """
+    from openpyxl.styles import PatternFill
+    
+    # 创建颜色填充对象
+    color_fills = {}
+    for row in value_color_mapping:
+        color_fills[row['cell_value']] = PatternFill(
+            start_color=row['color_code'],
+            end_color=row['color_code'],
+            fill_type='solid'
+        )
+    
+    # 遍历所有单元格
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value is not None:
+                cell_value_str = str(cell.value)
+                
+                # 根据匹配模式进行匹配
+                for value, fill in color_fills.items():
+                    if match_mode == 'exact' and cell_value_str == value:
+                        cell.fill = fill
+                    elif match_mode == 'contains_value' and value in cell_value_str:
+                        cell.fill = fill

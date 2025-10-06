@@ -12,6 +12,7 @@ from pathlib import Path
 import signal
 import threading
 import time
+from vercel_blob import BlobStore
 
 # 添加 pipeline 模块路径
 sys.path.append('pipeline')
@@ -21,6 +22,9 @@ from pipeline.clean_pipeline_v3 import process_one_file, get_date_str_from_text
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # 用于 session
+
+# 初始化Vercel Blob
+blob_store = BlobStore()
 
 # 配置
 UPLOAD_FOLDER = tempfile.gettempdir()
@@ -110,9 +114,6 @@ def upload_files():
         # 创建临时文件
         temp_dir = tempfile.mkdtemp()
         
-        # 将临时目录保存到 session
-        session['temp_dir'] = temp_dir
-        
         # 保存全量名单
         name_path = os.path.join(temp_dir, 'known_names_select.txt')
         name_content = name_file.read().decode('utf-8')
@@ -158,31 +159,27 @@ def upload_files():
         # 处理 NaN 值，转换为 None 以便 JSON 序列化
         result_df = result_df.fillna('')
         
+        # 上传处理结果到Vercel Blob
+        import uuid
+        file_id = str(uuid.uuid4())
+        blob_filename = f'processed_{file_id}.xlsx'
+        
+        # 读取文件内容
+        with open(output_path, 'rb') as f:
+            file_content = f.read()
+        
+        # 上传到Vercel Blob
+        blob_url = blob_store.put(blob_filename, file_content)
+        
         return jsonify({
             'success': True,
             'message': f'处理完成！共处理 {len(result_df)} 条记录',
-            'download_url': f'/download/{os.path.basename(output_path)}'
+            'download_url': blob_url,
+            'file_id': file_id
         })
         
     except Exception as e:
         return jsonify({'error': f'处理失败: {str(e)}'}), 500
-
-@app.route('/download/<filename>')
-def download_file(filename):
-    """下载处理结果文件"""
-    try:
-        # 从 session 中获取临时目录
-        temp_dir = session.get('temp_dir')
-        if not temp_dir:
-            return jsonify({'error': '会话已过期，请重新上传文件'}), 404
-        
-        file_path = os.path.join(temp_dir, filename)
-        if os.path.exists(file_path):
-            return send_file(file_path, as_attachment=True)
-        else:
-            return jsonify({'error': '文件不存在'}), 404
-    except Exception as e:
-        return jsonify({'error': f'下载失败: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
