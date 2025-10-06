@@ -15,7 +15,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 # 添加父目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline.llm_client import _get_client
+from pipeline.llm.llm_client import _get_client
 from pipeline.prompts_v3 import PROMPT_BATCH
 from CONFIG import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, HALL_FILTER, COLS_CONFIG
 
@@ -611,25 +611,65 @@ def get_date_str_from_text(text):
     PROMPT_DATE_EXTRACT = f'''
     当前时间是: {datetime.now().strftime('%Y年')}
 
-    你是一个时间日期解析助手。请根据当前时间以及以下文本，返回这个文件合适的日期字符串。
+    你是一个时间日期解析助手。请根据以下文本，返回这个文件合适的日期字符串。
     
     输入文本：{text}
     
-    返回格式为 YYYYMMDD 的日期字符串。
+    **重要规则：**
+    1. 如果文件名中**没有明确的日期信息**，返回空字符串 ''
+    2. 如果日期信息**有歧义**（如09223可能是0922或0923），返回空字符串 ''
+    3. 如果日期信息**不完整**（如只有月份没有日期），返回空字符串 ''
+    4. 只有**明确且无歧义**的日期才返回 YYYYMMDD 格式
+    5. 支持多种日期格式的识别和转换
+    
+    返回格式为 YYYYMMDD 的日期字符串，不确定时返回空字符串 ''。
     
     示例：
-    输入：映客10月03日打卡数据.xlsx
+    输入：映客10月03日打卡数据.xlsx， 且我们已知当年是2025年，则
     输出：20251003
     
     输入：主持打卡9.27.xlsx
     输出：20250927
+    
+    输入：打卡数据.xlsx
+    输出：
+    
+    输入：主持打卡09223.xlsx
+    这个有歧义
+    输出：
+    
+    输入：10月打卡.xlsx
+    输出：
+    
+    输入：主持打卡2024-10-03.xlsx
+    输出：20241003
+    
+  
 
-
+    **只返回日期字符串或空字符串，不要有任何其他文字！**
     '''
-    response = model_client.get_completion(
-        PROMPT_DATE_EXTRACT.format(text=text)
-    )
-    return response
+    try:
+        response = model_client.get_completion(
+            PROMPT_DATE_EXTRACT.format(text=text)
+        )
+        
+        # 清理响应内容
+        response = response.strip().replace("'", "")
+        
+        # 验证返回格式
+        if response == '':
+            return ''
+        
+        # 检查是否为8位数字格式
+        if len(response) == 8 and response.isdigit():
+            return response
+        
+        # 如果不符合格式，返回空字符串
+        return ''
+        
+    except Exception as e:
+        print(f"日期提取出错: {e}")
+        return ''
 
 
 model_client = _get_client(model_name=CURRENT_MODEL)

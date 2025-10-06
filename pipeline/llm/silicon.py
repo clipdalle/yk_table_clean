@@ -13,7 +13,8 @@ curl --request POST \
 }'
 """
 import sys 
-sys.path.append('.')
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import json
 import requests
 from typing import List, Dict

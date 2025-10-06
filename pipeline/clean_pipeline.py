@@ -14,7 +14,7 @@ from typing import Dict, List
 # 添加父目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline.llm_client import _get_client
+from pipeline.llm.llm_client import _get_client
 from pipeline.prompts import PROMPT_BATCH
 from CONFIG import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, HALL_FILTER, COLS_CONFIG
 

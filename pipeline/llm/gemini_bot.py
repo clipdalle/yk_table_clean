@@ -5,7 +5,7 @@ Gemini API 调用（类封装）
 
 import os
 import sys
-sys.path.append('.')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from CONFIG import GOOGLE_API_KEY, get_google_api_key
 from google import genai

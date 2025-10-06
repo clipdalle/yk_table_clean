@@ -1,91 +1,93 @@
-# 语音厅考勤表 - 字段清洗
+# 麦序数据清洗 Flask 应用
 
-使用 Gemini API 清洗混乱的"主持"和"排麦人员"字段
+一个基于 Flask 的麦序数据清洗 Web 应用，支持上传全量名单和麦序Excel文件，在线处理并返回结果。
 
-## 快速开始
+## 功能特点
 
-### 1. 安装依赖
-```bash
-pip install -r requirements.txt
-```
+- 🎤 **智能解析**：使用 LLM 自动解析麦序数据
+- 📋 **名单匹配**：基于全量名单进行人名标准化和匹配
+- 🎨 **美观界面**：现代化的 Web 界面设计
+- ☁️ **云端部署**：支持 Vercel 部署
+- 📊 **实时处理**：在线处理，无需本地安装
 
-### 2. 配置
-编辑 `CONFIG.py` 文件：
-```python
-# API Key
-GOOGLE_API_KEY = "your-gemini-api-key"
-GLM4_API_KEY = "your-glm4-api-key"
+## 技术栈
 
-# 模型选择（'gemini' 或 'glm4'）
-CURRENT_MODEL = 'glm4'  # 当前使用的模型
-
-# LLM 参数
-TEMPERATURE = 0.3   # 温度参数 (0.0-1.0)，越低越确定
-BATCH_SIZE = 10     # 每批处理的行数
-```
-
-### 3. 运行（推荐）
-```bash
-python main.py
-```
-交互式菜单，选择操作
-
-或者直接运行：
-```bash
-# 测试
-python pipeline/test_clean_sample.py
-
-# 批量处理
-python pipeline/clean_pipeline.py
-```
-
-### 4. 查看结果
-会生成两个文件：
-- `output/主持打卡9.30_cleaned.xlsx` - 纯文本版
-- `output/主持打卡9.30_cleaned_with_formula.xlsx` - 带公式版（推荐）
+- **后端**：Flask + Python
+- **前端**：HTML5 + CSS3 + JavaScript
+- **数据处理**：pandas + openpyxl
+- **AI 处理**：Google Gemini / GLM-4 / DeepSeek V3
+- **部署**：Vercel
 
 ## 项目结构
 
 ```
-smart_table/
-├── main.py                       # 主入口（交互式菜单）
-├── pipeline/                     # 代码文件夹
-│   ├── llm_client.py            # 统一 LLM 调用接口
-│   ├── gemini_bot.py            # Gemini API 客户端
-│   ├── glm4_bot.py              # GLM-4 API 客户端
-│   ├── prompts.py               # Prompt 模板
-│   ├── clean_pipeline.py        # 批量清洗主流程
-│   └── test_clean_sample.py     # 测试脚本
-├── data/                         # 数据文件夹
-├── output/                       # 输出文件夹
-└── CONFIG.py                     # 配置文件
+├── app.py                 # Flask 主应用
+├── templates/
+│   └── index.html        # 前端页面
+├── pipeline/              # 核心业务逻辑
+│   ├── clean_pipeline_v3.py
+│   ├── llm_client.py
+│   ├── prompts_v3.py
+│   └── ...
+├── CONFIG.py             # 配置文件
+├── requirements.txt      # Python 依赖
+├── vercel.json          # Vercel 配置
+└── README.md
 ```
 
-## 预期效果
+## 使用方法
 
-- AI 准确率：85-95%
-- 人工校验后：100%
-- 处理时间：约 1 分钟（200条，每批10行，共20次API调用）
-- 成本：几乎免费
+### 1. 本地运行
 
-## 新增列说明
+```bash
+# 安装依赖
+pip install -r requirements.txt
 
-清洗后会在原表右侧新增 7 列：
+# 运行应用
+python app.py
+```
 
-**主持相关（1列）：**
-1. `主持人员列表_AI解析` - 清洗后的主持人员（竖线分隔）
+访问 `http://localhost:5000` 即可使用。
 
-**排麦相关（4列）：**
-2. `排麦人员列表_AI解析` - 清洗后的排麦人员（竖线分隔）
-3. `排麦出席人数_AI解析` - 实际解析到的人员数量
-4. `排麦缺席人数_AI解析` - 从文本中读取的缺席数（如"缺2"）
-5. `排麦置信度_AI解析` - 置信度（high/medium/low）
+### 2. Vercel 部署
 
-**错误信息（2列，在最右侧）：**
-6. `主持错误_AI解析` - 主持字段解析错误
-7. `排麦错误_AI解析` - 排麦字段解析错误
+1. 将代码推送到 GitHub
+2. 在 Vercel 中导入项目
+3. 配置环境变量（API Keys）
+4. 部署完成
 
-**注意：** 人员列表使用竖线 `|` 分隔，如：`王摆摆|九酱|珊珊`
+## 使用流程
 
-**带公式版本额外功能：**
-- Sheet2: 人员主持排麦统计（自动统计每个人的主持次数和排麦次数）
+1. **上传全量名单**：上传包含所有可能人名的 `.txt` 文件
+2. **上传麦序Excel**：上传需要处理的麦序数据 `.xlsx` 文件
+3. **开始处理**：点击处理按钮，系统自动解析数据
+4. **下载结果**：处理完成后下载清洗后的 Excel 文件
+
+## 核心功能
+
+- **人名标准化**：自动处理大小写、装饰符号
+- **智能解析**：使用 LLM 解析混乱的麦序文本
+- **数据清洗**：提取主持人员、排麦人员、缺席人数等
+- **错误标记**：标记未知人名和低置信度数据
+- **Excel 输出**：生成带公式和着色的 Excel 文件
+
+## 环境变量
+
+在 Vercel 中配置以下环境变量：
+
+```
+GOOGLE_API_KEY=your_gemini_api_key
+GLM4_API_KEY=your_glm4_api_key
+SILICONFLOW_API_KEY=your_siliconflow_api_key
+```
+
+## 注意事项
+
+- 文件大小限制：建议单个文件不超过 10MB
+- 处理时间：根据数据量可能需要 1-5 分钟
+- 数据安全：文件仅在处理期间临时存储，不会永久保存
+- API 限制：注意各 LLM 服务的 API 调用限制
+
+## 许可证
+
+MIT License

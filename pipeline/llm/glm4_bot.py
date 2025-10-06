@@ -8,7 +8,7 @@ import json
 import sys
 import os
 
-sys.path.append('.')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from CONFIG import GLM4_API_KEY
 
 
