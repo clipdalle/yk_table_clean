@@ -152,7 +152,7 @@ def upload_files():
   
         # 检测环境并设置合适的超时时间
         is_vercel = os.getenv('VERCEL') == '1'
-        timeout_seconds = 60 if is_vercel else 120  # Vercel环境使用更短的超时
+        timeout_seconds = 120 if is_vercel else 120  # Vercel环境使用更短的超时
         
         print(f"🌍 环境检测: {'Vercel生产环境' if is_vercel else '本地开发环境'}")
         print(f"⏱️ 超时设置: {timeout_seconds}秒")
