@@ -1,0 +1,544 @@
+"""
+排麦人员 & 主持人员字段清洗 Pipeline
+使用 Gemini API 批量解析混乱的文本，生成人工校验表
+"""
+
+import pandas as pd
+import json
+import time
+import sys
+import os
+from pathlib import Path
+from typing import Dict, List
+
+# 添加父目录到路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from pipeline.llm_client import _get_client
+from pipeline.prompts import PROMPT_BATCH
+from CONFIG import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, HALL_FILTER, COLS_CONFIG
+
+# （已弃用的单文件输出常量已移除，流程改为按 data 目录批量处理并只产出最终着色文件）
+
+
+# ========== 核心函数 ==========
+
+def parse_batch(batch_df: pd.DataFrame) -> List[Dict]:
+    """
+    批量解析多行数据（一次 API 调用）
+    
+    Args:
+        batch_df: 批次数据框
+    
+    Returns:
+        解析结果列表
+    """
+    # 构建批量输入数据
+    batch_data = []
+    for idx, row in batch_df.iterrows():
+        batch_data.append({
+            "行号": idx,
+            "厅名中文": row['厅名中文'],
+            "日期": row['日期（必填）'],
+            "主持": row['主持（必填）'],
+            "排麦人员": row['排麦人员（必填）']
+        })
+    
+    # 构建 prompt
+    prompt = PROMPT_BATCH.format(
+        batch_data=json.dumps(batch_data, ensure_ascii=False, indent=2)
+    )
+
+    with open('test_prompt.txt', 'w', encoding='utf-8') as f:
+        f.write(prompt)
+    
+    try:
+        # 调用 LLM
+        response = model_client.get_completion(prompt, temperature=TEMPERATURE)
+        
+        # 清理 markdown 代码块
+        response = response.strip()
+        if response.startswith('```json'):
+            response = response[7:]
+        if response.startswith('```'):
+            response = response[3:]
+        if response.endswith('```'):
+            response = response[:-3]
+        response = response.strip()
+        
+        # 解析 JSON
+        results = json.loads(response)
+
+        with open('test_results.txt', 'w', encoding='utf-8') as f:
+            f.write(json.dumps(results, ensure_ascii=False, indent=2))
+        
+        # 验证结果
+        if not isinstance(results, list):
+            raise ValueError("返回结果不是数组")
+        
+        return results
+    
+    except Exception as e:
+        # 批量解析失败，返回默认值
+        print(f"\n⚠️ 批量解析失败: {e}")
+        print(f"\n原始输入数据:")
+        print(json.dumps(batch_data, ensure_ascii=False, indent=2))
+        print(f"\nLLM 响应:")
+        print(response[:500] if 'response' in locals() else "无响应")
+        
+        return [
+            {
+                "行号": idx,
+                "主持": {
+                    "主持人员列表": []
+                },
+                "排麦": {
+            "排麦人员列表": [],
+            "缺席人数": 0,
+                    "置信度": "low"
+                },
+                "错误": f"批量解析失败: {str(e)[:50]}"
+            }
+            for idx in batch_df.index
+        ]
+
+
+
+def batch_parse_fields(
+    df: pd.DataFrame, 
+    date_str_from_file: str, 
+    strict_date_filter: bool = False) -> pd.DataFrame:
+    """
+    批量解析排麦人员和主持人员字段（每个 batch：构造输入 -> 调用 LLM -> 解析 -> 直接写回 DataFrame）
+    """
+    total = len(df)
+    num_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
+
+    print(f"开始批量解析 {total} 条记录...")
+    print(f"批次设置: 每批 {BATCH_SIZE} 行，共 {num_batches} 批")
+    print(f"预计耗时: 约 {num_batches * 0.5:.1f} 分钟")
+
+    # 确保目标列存在
+    target_columns = [
+        '主持人员列表_AI解析',
+        '排麦人员列表_AI解析',
+        '排麦出席人数_AI解析',
+        '排麦缺席人数_AI解析',
+        '排麦置信度_AI解析',
+        '标准化日期_AI解析',
+        '日期匹配标志_AI解析',
+        '主持错误_AI解析',
+        '排麦错误_AI解析',
+    ]
+    for col in target_columns:
+        if col not in df.columns:
+            df[col] = ''
+
+    total_start_ts = time.time()
+
+    for batch_idx in range(num_batches):
+        start_idx = batch_idx * BATCH_SIZE
+        end_idx = min((batch_idx + 1) * BATCH_SIZE, total)
+
+        batch_df = df.iloc[start_idx:end_idx]
+
+        print(f"处理批次 {batch_idx + 1}/{num_batches} (第 {start_idx+1}-{end_idx} 行)...", end='')
+        batch_start_ts = time.time()
+
+        try:
+            # 1) LLM 批量解析
+            batch_results = parse_batch(batch_df)
+    except Exception as e:
+            elapsed = time.time() - batch_start_ts
+            print(f" ❌ 失败，用时 {elapsed:.2f}s")
+            print(f"   错误: {e}")
+            print(f"   该批次数据将使用默认值")
+
+            
+        # 2) 逐行写回
+        for result in batch_results:
+            idx = result.get('行号')
+            host_data = result['主持']
+            paimai_data = result['排麦']
+            error_msg = result.get('错误', '')
+
+            host_list = host_data['主持人员列表']
+            if len(host_list) > 5:
+                raise ValueError(f"主持人员列表长度超过5: {host_list}")
+            paimai_list = paimai_data['排麦人员列表']
+            lack_num = paimai_data['缺席人数']
+            conf = paimai_data['置信度']
+            row_standard_date_str = result['标准化日期']
+
+            df.at[idx, '主持人员列表_AI解析'] = '|'.join(host_list)
+            df.at[idx, '排麦人员列表_AI解析'] = '|'.join(paimai_list)
+            df.at[idx, '排麦出席人数_AI解析'] = len(paimai_list)
+            df.at[idx, '排麦缺席人数_AI解析'] = lack_num
+            df.at[idx, '排麦置信度_AI解析'] = conf
+            df.at[idx, '标准化日期_AI解析'] = row_standard_date_str
+            df.at[idx, '日期匹配标志_AI解析'] = (row_standard_date_str == date_str_from_file)
+            df.at[idx, '主持错误_AI解析'] = error_msg
+            df.at[idx, '排麦错误_AI解析'] = error_msg
+
+            print(row_standard_date_str, date_str_from_file)
+
+        elapsed = time.time() - batch_start_ts
+        print(f" 完成，用时 {elapsed:.2f}s")
+
+
+
+        # 限流保护
+        if batch_idx < num_batches - 1:
+            time.sleep(0.5)
+
+    total_elapsed = time.time() - total_start_ts
+    print(f"\n✅ 解析完成！总用时 {total_elapsed/60:.2f} 分钟（{total_elapsed:.1f} 秒）")
+    
+    # 可选的严格过滤：只保留匹配日期的行（用于统计/导出）
+    if strict_date_filter:
+        before_cnt = len(df)
+        df = df[df['标准化日期_AI解析'] == date_str_from_file]
+        after_cnt = len(df)
+        print(f"📆 严格日期过滤: 仅保留 标准化日期=={date_str_from_file} 的行 {after_cnt}/{before_cnt}")
+    
+    return df
+
+
+def save_cleaned_data(df: pd.DataFrame, output_path: str):
+    """
+    保存清洗后的数据（按 COLS_CONFIG 排序列）
+
+    Args:
+        df: 包含解析结果的数据框
+        output_path: 输出文件路径
+    """
+    # 按 COLS_CONFIG 重新排列列
+    col_order = [col['col_name'] for col in COLS_CONFIG if col['col_name'] in df.columns]
+    # 添加不在 COLS_CONFIG 中的列（如果有）
+    remaining_cols = [col for col in df.columns if col not in col_order]
+    final_col_order = col_order + remaining_cols
+
+    df_sorted = df[final_col_order]
+
+    # 保存为普通 Excel
+    df_sorted.to_excel(output_path, index=False)
+
+    print(f"✅ 清洗后的数据已保存: {output_path}")
+    print(f"   - 原始列: {len(df_sorted.columns) - 7} 列")
+    print(f"   - 新增列: 7 列（主持x1、排麦x4、错误x2）")
+    print(f"   - 总列数: {len(df_sorted.columns)} 列")
+    print(f"   - 列已按 CONFIG.COLS_CONFIG 排序")
+
+
+def  dudup_names(names: List[str]) -> List[str]:
+    """
+    去重人名（仅英文大小写不敏感；中文/其他字符保持不变）。
+    - 保留第一次出现的展示名顺序
+    - 规范键：将 A-Z 转小写，其它字符不变
+    """
+    from collections import OrderedDict
+
+    if not names:
+        return []
+
+    # 仅将英文字母 A-Z 转为小写，其他字符（含中文）不变
+    ascii_lower_table = {ord(c): ord(c.lower()) for c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'}
+
+    def normalize_ascii_lower(s: str) -> str:
+        return (s or '').translate(ascii_lower_table).strip()
+
+    norm_to_display = OrderedDict()
+    for display in names:
+        if display is None:
+            continue
+        disp = str(display).strip()
+        if not disp:
+            continue
+        norm = normalize_ascii_lower(disp)
+        if norm and norm not in norm_to_display:
+            norm_to_display[norm] = disp
+
+    return list(norm_to_display.values())
+
+
+
+
+def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str):
+    """
+    保存清洗后的数据（带公式版本，统计表在右侧）
+    
+    Args:
+        df: 包含解析结果的数据框
+        output_path: 输出文件路径
+    """
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+    from openpyxl.styles import PatternFill, Font, Alignment
+
+    # 按 COLS_CONFIG 重新排列列
+    col_order = [col['col_name'] for col in COLS_CONFIG if col['col_name'] in df.columns]
+    remaining_cols = [col for col in df.columns if col not in col_order]
+    final_col_order = col_order + remaining_cols
+    df_sorted = df[final_col_order]
+
+    path_step1 = output_path.replace('.xlsx', '.step1_clean_table.xlsx')
+    df_sorted.to_excel(path_step1, index=False)
+
+    # 加载工作簿（用于添加统计表）
+    wb = load_workbook(path_step1)
+    ws = wb.active
+
+    # 找到相关列（用于右侧统计区）
+    headers = [cell.value for cell in ws[1]]
+    host_list_col = None
+    paimai_list_col = None
+    
+    for idx, header in enumerate(headers, 1):
+        if header == '主持人员列表_AI解析':
+            host_list_col = idx
+        elif header == '排麦人员列表_AI解析':
+            paimai_list_col = idx
+    
+    if host_list_col and paimai_list_col:
+        host_col_letter = get_column_letter(host_list_col)
+        paimai_col_letter = get_column_letter(paimai_list_col)
+        data_row_count = ws.max_row
+        
+        # 提取所有唯一的人名（从主持和排麦列表中）
+        all_names = set()
+        
+        # 从主持列提取（使用竖线分隔）
+        for row in range(2, data_row_count + 1):
+            cell_value = ws[f'{host_col_letter}{row}'].value
+            if cell_value and str(cell_value).strip():
+                names = [name.strip() for name in str(cell_value).split('|')]
+                all_names.update(names)
+        
+        # 从排麦列提取（使用竖线分隔）
+        for row in range(2, data_row_count + 1):
+            cell_value = ws[f'{paimai_col_letter}{row}'].value
+            if cell_value and str(cell_value).strip():
+                names = [name.strip() for name in str(cell_value).split('|')]
+                all_names.update(names)
+        
+        # 按字母顺序排序
+        all_names = dudup_names(all_names)
+        sorted_names = sorted(all_names)
+        
+        # 统计表放在右侧，空两列后开始
+        stats_start_col = len(headers) + 3  # 空两列
+        stats_col_1 = get_column_letter(stats_start_col)
+        stats_col_2 = get_column_letter(stats_start_col + 1)
+        stats_col_3 = get_column_letter(stats_start_col + 2)
+        
+        # 设置统计表表头（带样式）
+        header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')  # 深蓝色
+        header_font = Font(bold=True, color='FFFFFF')  # 白色粗体
+        
+        ws[f'{stats_col_1}1'] = '人员姓名'
+        ws[f'{stats_col_1}1'].fill = header_fill
+        ws[f'{stats_col_1}1'].font = header_font
+        ws[f'{stats_col_1}1'].alignment = Alignment(horizontal='center')
+        
+        ws[f'{stats_col_2}1'] = '主持次数'
+        ws[f'{stats_col_2}1'].fill = header_fill
+        ws[f'{stats_col_2}1'].font = header_font
+        ws[f'{stats_col_2}1'].alignment = Alignment(horizontal='center')
+        
+        ws[f'{stats_col_3}1'] = '排麦次数'
+        ws[f'{stats_col_3}1'].fill = header_fill
+        ws[f'{stats_col_3}1'].font = header_font
+        ws[f'{stats_col_3}1'].alignment = Alignment(horizontal='center')
+        
+        # 填充人名和公式
+        for idx, name in enumerate(sorted_names, 2):  # 从第2行开始
+            # 人员姓名
+            ws[f'{stats_col_1}{idx}'] = name
+            
+            # 主持次数（COUNTIF 公式）
+            formula_host = f'=COUNTIF({host_col_letter}:{host_col_letter},"*{name}*")'
+            ws[f'{stats_col_2}{idx}'] = formula_host
+            
+            # 排麦次数（COUNTIF 公式）
+            formula_paimai = f'=COUNTIF({paimai_col_letter}:{paimai_col_letter},"*{name}*")'
+            ws[f'{stats_col_3}{idx}'] = formula_paimai
+        
+        # 设置列宽
+        ws.column_dimensions[stats_col_1].width = 20
+        ws.column_dimensions[stats_col_2].width = 15
+        ws.column_dimensions[stats_col_3].width = 15
+
+    # 保存
+    path_step2 = output_path.replace('.xlsx', '.add_stats_formula.xlsx')
+    wb.save(path_step2)
+    wb.close()
+
+    # 直接对最终文件进行着色（不生成额外文件）
+    from pipeline.coloring import apply_column_colors_from_config
+    apply_column_colors_from_config(path_step2, COLS_CONFIG, output_path)
+
+    print(f"✅ 已保存（带公式且着色）: {output_path}")
+    print(f"   - 数据列: {len(headers)} 列")
+    print(f"   - 统计表: 在右侧（空2列后）")
+    print(f"   - 统计人数: {len(sorted_names) if host_list_col and paimai_list_col else 0} 人")
+    print(f"   - 公式会自动统计每个人的主持次数和排麦次数")
+    print(f"   - 修改人员列表后，统计会自动更新")
+    print(f"   - 基于 CONFIG.COLS_CONFIG 配置着色")
+
+    #清理step1和step2中间文件
+    Path(path_step1).unlink()
+    Path(path_step2).unlink()
+
+
+
+
+def generate_statistics(df: pd.DataFrame):
+    """
+    生成统计报告
+    
+    Args:
+        df: 包含解析结果的数据框
+    """
+    print("\n" + "="*60)
+    print("解析结果统计")
+    print("="*60)
+    
+    total = len(df)
+    
+    # 主持字段统计
+    print("\n【主持字段】")
+    host_errors = (df['主持错误_AI解析'] != '').sum()
+    print(f"成功解析: {total - host_errors} ({(total-host_errors)/total*100:.1f}%)")
+    print(f"解析错误: {host_errors}")
+    
+    # 排麦字段统计
+    print("\n【排麦字段】")
+    paimai_high = (df['排麦置信度_AI解析'] == 'high').sum()
+    paimai_medium = (df['排麦置信度_AI解析'] == 'medium').sum()
+    paimai_low = (df['排麦置信度_AI解析'] == 'low').sum()
+    paimai_errors = (df['排麦错误_AI解析'] != '').sum()
+    
+    print(f"高置信度: {paimai_high} ({paimai_high/total*100:.1f}%)")
+    print(f"中置信度: {paimai_medium} ({paimai_medium/total*100:.1f}%)")
+    print(f"低置信度: {paimai_low} ({paimai_low/total*100:.1f}%)")
+    print(f"解析错误: {paimai_errors}")
+    
+    # 建议
+    need_check = paimai_low + paimai_medium
+    print(f"\n建议优先检查: 约 {need_check} 条记录（排麦低+中置信度）")
+
+from pathlib import Path
+# ========== 主流程 ==========
+import re 
+def extract_chinese(text):
+    return re.sub(r'[^\u4e00-\u9fa5]', '', text)
+
+def process_one_file(excel_path: str, output_path: str, date_str_from_file: str, STRICT_DATE_FILTER: bool = False):
+    """处理单个 Excel 文件并输出最终着色文件
+
+    Args:
+        excel_path: 输入 Excel 路径
+        output_path: 最终着色文件路径（必填）。
+    """
+    output_dir = Path(output_path).parent
+    output_dir.mkdir(exist_ok=True)
+    print("="*60)
+    print("排麦人员 & 主持人员字段清洗 Pipeline")
+    print("="*60)
+    print(f"当前使用模型: {CURRENT_MODEL.upper()}")
+    print("="*60)
+    Path('output').mkdir(exist_ok=True)
+    
+    # 1. 读取数据
+    print(f"\n📖 读取数据: {excel_path}")
+    df = pd.read_excel(excel_path, sheet_name=0)
+    df['厅名中文'] = df['厅号（必填）'].apply(extract_chinese)
+    print(f"   - 原始记录数: {len(df)}")
+        
+    # 筛选特定厅号（如果配置了筛选条件）
+    if HALL_FILTER:
+        df = df[df['厅号（必填）'].str.contains(HALL_FILTER, na=False)]
+        print(f"   - 筛选条件: {HALL_FILTER}")
+        print(f"✅ 读取完成，筛选后共 {len(df)} 条记录")
+    else:
+        print(f"✅ 读取完成，未筛选，共 {len(df)} 条记录")
+
+ 
+    
+    # 2. 批量解析
+    print(f"\n🤖 开始 LLM 批量解析...")
+    df_parsed = batch_parse_fields(
+        df,
+        date_str_from_file=date_str_from_file,
+        strict_date_filter=STRICT_DATE_FILTER
+    )
+    
+    # 3. 生成统计
+    generate_statistics(df_parsed)
+    
+    # 4. 仅保存带公式版本并生成着色版本（中间产物）
+    print(f"\n📊 保存带公式版本并着色...")
+    save_cleaned_data_with_formula(df_parsed, str(output_path))
+
+    # 在最终路径上已完成写入与着色
+    
+    print("\n" + "="*60)
+    print("✅ Pipeline 执行完成！")
+    print("="*60)
+    print(f"\n📋 输出文件：")
+    print(f"1. {output_path}")
+    print(f"   - 带公式且着色版本")
+    print(f"   - 基于 CONFIG.COLS_CONFIG 配置着色")
+    print(f"\n💡 说明：仅输出带颜色版本，便于直接人工校验")
+
+
+from datetime import datetime 
+
+def get_date_str_from_text(text):
+    PROMPT_DATE_EXTRACT = f'''
+    当前时间是: {datetime.now().strftime('%Y年')}
+
+    你是一个时间日期解析助手。请根据当前时间以及以下文本，返回这个文件合适的日期字符串。
+    
+    输入文本：{text}
+    
+    返回格式为 YYYYMMDD 的日期字符串。
+    
+    示例：
+    输入：映客10月03日打卡数据.xlsx
+    输出：20251003
+    
+    输入：主持打卡9.27.xlsx
+    输出：20250927
+
+
+    '''
+    response = model_client.get_completion(
+        PROMPT_DATE_EXTRACT.format(text=text)
+    )
+    return response
+
+
+
+model_client = _get_client(model_name=CURRENT_MODEL)
+
+from CONFIG import BATCH_SIZE
+
+
+
+if __name__ == '__main__':
+    
+    paths = list(Path('daily_data').glob('*.xlsx'))
+#    paths = [r'F:\vscode_workspace\smart_table\daily_data\主持打卡9.30.xlsx']
+    for p in paths:
+        p = Path(p)
+        STRICT_DATE_FILTER = True
+        output_path = p.with_suffix(f'.{CURRENT_MODEL}.output.filter_date_{STRICT_DATE_FILTER}.xlsx')
+
+        if 'output' in p.stem:
+            continue 
+
+        date_str_from_file = get_date_str_from_text(p.stem)
+        if Path(output_path).exists():
+            continue
+        process_one_file(p, output_path=output_path, date_str_from_file=date_str_from_file, STRICT_DATE_FILTER=STRICT_DATE_FILTER)
