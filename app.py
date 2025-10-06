@@ -12,6 +12,7 @@ from pathlib import Path
 import signal
 import threading
 import time
+# Vercel Blob是可选的，生产环境会自动提供
 try:
     from vercel_blob import BlobStore
 except ImportError:

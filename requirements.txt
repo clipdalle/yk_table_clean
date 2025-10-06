@@ -4,4 +4,3 @@ openpyxl
 tenacity
 google-genai
 requests
-vercel-blob
