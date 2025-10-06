@@ -165,7 +165,6 @@ def batch_parse_fields(
             
         # 2) 逐行写回
         for result in batch_results:
-            print(result)
             idx = result.get('行号')
             host_data = result['主持']
             paimai_data = result['排麦']
@@ -205,6 +204,9 @@ def batch_parse_fields(
     if strict_date_filter:
         before_cnt = len(df)
         df = df[df['标准化日期_AI解析'] == date_str_from_file]
+
+        # print(date_str_from_file)
+        # df.to_excel('debug.xlsx', index=False)
         after_cnt = len(df)
         print(f"📆 严格日期过滤: 仅保留 标准化日期=={date_str_from_file} 的行 {after_cnt}/{before_cnt}")
     
@@ -544,7 +546,7 @@ def extract_chinese(text):
         raise ValueError(text)
 
 
-def process_one_file(excel_path: str, output_path: str, date_str_from_file: str, STRICT_DATE_FILTER: bool = False):
+def process_one_file(excel_path: str, output_path: str, date_str_from_file: str, strict_date_filter: bool = False):
     """处理单个 Excel 文件并输出最终着色文件
 
     Args:
@@ -587,7 +589,7 @@ def process_one_file(excel_path: str, output_path: str, date_str_from_file: str,
     df_parsed = batch_parse_fields(
         df,
         date_str_from_file=date_str_from_file,
-        strict_date_filter=STRICT_DATE_FILTER
+        strict_date_filter=strict_date_filter
     )
     
     # 3. 生成统计
@@ -717,7 +719,7 @@ if __name__ == '__main__':
     paths = list(Path('daily_data').glob('*.xlsx'))
     for p in paths:
         p = Path(p)
-        STRICT_DATE_FILTER = True
+ 
         output_path = p.with_suffix(f'.{CURRENT_MODEL}.v3.output.xlsx')
         # if 'v3' in p.stem:
         #     continue
@@ -725,7 +727,5 @@ if __name__ == '__main__':
             continue 
 
         date_str_from_file = get_date_str_from_text(p.stem)
-        if Path(output_path).exists():
-            continue
-        process_one_file(p, output_path=output_path, date_str_from_file=date_str_from_file, STRICT_DATE_FILTER=STRICT_DATE_FILTER)
+        process_one_file(p, output_path=output_path, date_str_from_file=date_str_from_file, process_one_file=STRICT_DATE_FILTER)
         time.sleep(1)

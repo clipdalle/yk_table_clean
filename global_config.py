@@ -37,6 +37,7 @@ SILICONFLOW_MODEL = 'deepseek-ai/DeepSeek-V3.1-Terminus'#'deepseek-ai/DeepSeek-V
 CURRENT_MODEL = 'glm4' #'silicon_ds_v3'  # 当前使用的模型
 CURRENT_MODEL = 'silicon_ds_omni' #deepseek-ai/DeepSeek-R1
 CURRENT_MODEL = 'silicon_qwen3_80B'
+STRICT_DATE_FILTER = True
 # ========== LLM 调用参数 ==========
 
 # 温度参数 (0.0 - 1.0)

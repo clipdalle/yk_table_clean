@@ -19,7 +19,7 @@ from vercel_blob import blob_store as VercelBlobStore
 # 添加 pipeline 模块路径
 sys.path.append('pipeline')
 import os 
-
+from global_config import STRICT_DATE_FILTER
 # 导入核心业务逻辑
 from pipeline.clean_pipeline_v3 import process_one_file, get_date_str_from_text
 
@@ -89,7 +89,7 @@ def process_with_timeout(excel_path, output_path, date_str_from_file, timeout_se
             excel_path=excel_path,
             output_path=output_path,
             date_str_from_file=date_str_from_file,
-            STRICT_DATE_FILTER=False
+            strict_date_filter=STRICT_DATE_FILTER
         )
         result['success'] = True
     
@@ -186,7 +186,7 @@ def upload_files():
         file_base64 = base64.b64encode(file_content).decode('utf-8')
         
 
-        output_filename = Path(excel_file.filename).with_suffix('.cleaned.xlsx').name
+        output_filename = Path(excel_file.filename).with_suffix(f'.{date_str_from_ui}.cleaned.xlsx').name
         
         return jsonify({
             'success': True,
@@ -209,7 +209,7 @@ def upload_files():
         print(f"❌ 处理失败: {str(e)}")
         print(f"详细错误信息:\n{error_details}")
         
-        return jsonify({'error': f'处理失败: {str(e)}'}), 500
+        return jsonify({'error': f'处理失败: {error_details}'}), 500
 
 @app.route('/download/<filename>')
 def download_file(filename):
