@@ -29,3 +29,4 @@ CONFIG.py
 # Excel 临时文件
 ~$*.xlsx
 ~$*.xls
+.vercel
