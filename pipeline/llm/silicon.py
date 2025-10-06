@@ -19,7 +19,7 @@ import json
 import requests
 from typing import List, Dict
 
-from global_config import SILICONFLOW_API_KEY, SILICONFLOW_MODEL, TIMEOUT
+from global_config import SILICONFLOW_API_KEY, SILICONFLOW_MODEL, TIMEOUT, TEMPERATURE
 
 class SiliconModel:
     """SiliconFlow DeepSeek V3 API 客户端"""
@@ -28,8 +28,9 @@ class SiliconModel:
         self.api_key = api_key
         self.model = model
         self.endpoint = 'https://api.siliconflow.cn/v1/chat/completions'
+        self.temperature = TEMPERATURE
 
-    def get_completion(self, prompt: str, temperature: float = 0.7) -> str:
+    def get_completion(self, prompt: str) -> str:
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
@@ -39,7 +40,7 @@ class SiliconModel:
             'messages': [
                 {'role': 'user', 'content': prompt}
             ],
-            'temperature': temperature,
+            'temperature': self.temperature,
             'stream': False,
         }
 
@@ -66,7 +67,7 @@ class SiliconModel:
 
 
 if __name__ == '__main__':
-    client = SiliconDSV3Client()
+    client = SiliconModel()
     print(client.get_completion('用一句话介绍什么是机器学习'))
 
 
