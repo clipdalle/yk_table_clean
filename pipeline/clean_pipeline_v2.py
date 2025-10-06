@@ -446,7 +446,6 @@ def process_one_file(excel_path: str, output_path: str, date_str_from_file: str,
     print("="*60)
     print(f"当前使用模型: {CURRENT_MODEL.upper()}")
     print("="*60)
-    Path('output').mkdir(exist_ok=True)
     
     # 1. 读取数据
     print(f"\n📖 读取数据: {excel_path}")

@@ -207,7 +207,7 @@ def batch_parse_fields(
 def save_cleaned_data(df: pd.DataFrame, output_path: str):
     """
     保存清洗后的数据（按 COLS_CONFIG 排序列）
-
+    
     Args:
         df: 包含解析结果的数据框
         output_path: 输出文件路径
@@ -447,7 +447,6 @@ def process_one_file(excel_path: str, output_path: str, date_str_from_file: str,
     print("="*60)
     print(f"当前使用模型: {CURRENT_MODEL.upper()}")
     print("="*60)
-    Path('output').mkdir(exist_ok=True)
     
     # 1. 读取数据
     print(f"\n📖 读取数据: {excel_path}")
