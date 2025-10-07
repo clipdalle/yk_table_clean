@@ -40,7 +40,7 @@ print(f"人名清单: {known_names_select[:10]}..." if len(known_names_select) >
 import traceback 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
-def parse_batch(batch_df: pd.DataFrame) -> List[Dict]:
+def parse_batch(batch_df: pd.DataFrame, assist_known_names: List[str]) -> List[Dict]:
     """
     批量解析多行数据（一次 API 调用）
     
@@ -64,13 +64,8 @@ def parse_batch(batch_df: pd.DataFrame) -> List[Dict]:
     # 构建 prompt
     prompt = PROMPT_BATCH.format(
         batch_data=json.dumps(batch_data, ensure_ascii=False, indent=2),
-        known_names=json.dumps(known_names_select, ensure_ascii=False, indent=2)
+        known_names=json.dumps(assist_known_names, ensure_ascii=False, indent=2)
     )
-
-    # 写入temp目录而不是当前目录
-    test_prompt_path = get_temp_path('test_prompt.txt')
-    with open(test_prompt_path, 'w', encoding='utf-8') as f:
-        f.write(prompt)
     
     try:
         # 调用 LLM
@@ -130,7 +125,8 @@ def further_split(names: List[str], split_char: str = '-') -> List[str]:
 def batch_parse_fields(
     df: pd.DataFrame, 
     date_str_from_file: str, 
-    strict_date_filter: bool = False) -> pd.DataFrame:
+    strict_date_filter: bool = False,
+    assist_known_names: List[str] = None) -> pd.DataFrame:
     """
     批量解析排麦人员和主持人员字段（每个 batch：构造输入 -> 调用 LLM -> 解析 -> 直接写回 DataFrame）
     """
@@ -168,7 +164,7 @@ def batch_parse_fields(
         print(f"处理批次 {batch_idx + 1}/{num_batches} (第 {start_idx+1}-{end_idx} 行)...", end='')
         batch_start_ts = time.time()
 
-        batch_results = parse_batch(batch_df)
+        batch_results = parse_batch(batch_df, assist_known_names=assist_known_names)
             
         # 2) 逐行写回
         for result in batch_results:
@@ -553,7 +549,35 @@ def extract_chinese(text):
         raise ValueError(text)
 
 
-def process_one_file(excel_path: str, output_path: str, date_str_from_file: str, strict_date_filter: bool = False, selected_halls: list = None):
+
+def get_hall_2_names():
+    hall_2_names = {}
+    for p in Path('name_list').glob('*.txt'):
+        with open(p, 'r', encoding='utf-8') as f:
+            lines = [line.strip() for line in f.read().splitlines() if line.strip()]
+            hall_2_names[p.stem] = lines
+    return hall_2_names
+def gen_all_known_names(known_names_from_ui: List[str], selected_halls: List[str]):
+    hall_2_names = get_hall_2_names()
+    known_names_from_local = []
+    for hall in selected_halls:
+        known_names_from_local.extend(hall_2_names[hall])
+
+    
+    all_names = []
+    all_names.extend(known_names_from_ui)
+    all_names.extend(known_names_from_local)
+    all_names = list(set(all_names))
+    return all_names
+ 
+
+def process_one_file(
+        excel_path: str, 
+        output_path: str, 
+        date_str_from_file: str, 
+        strict_date_filter: bool = False, 
+        selected_halls: list = None,
+        known_names_from_ui: List[str] = None):
     """处理单个 Excel 文件并输出最终着色文件
 
     Args:
@@ -562,6 +586,7 @@ def process_one_file(excel_path: str, output_path: str, date_str_from_file: str,
         date_str_from_file: 日期字符串
         strict_date_filter: 是否严格按日期筛选
         selected_halls: 选择的厅号列表，用于筛选数据
+        known_names_from_ui: 从前端上传的已知人名列表
     """
     output_dir = Path(output_path).parent
     # 确保只在temp目录中创建目录
@@ -588,6 +613,9 @@ def process_one_file(excel_path: str, output_path: str, date_str_from_file: str,
     if not selected_halls or len(selected_halls) == 0:
         raise ValueError("❌ 错误：必须至少选择一个厅号进行处理")
     
+    # 从 name_list 目录读取辅助名单
+    all_known_names = gen_all_known_names(known_names_from_ui, selected_halls)
+        
     # 将厅号列表拼接成正则表达式，例如：['醉春色', '百媚生'] -> '醉春色|百媚生'
     hall_filter = '|'.join(selected_halls)
     print(f"   - 使用选择的厅号筛选: {hall_filter}")
@@ -595,13 +623,13 @@ def process_one_file(excel_path: str, output_path: str, date_str_from_file: str,
     print(f"✅ 读取完成，筛选后共 {len(df)} 条记录")
 
  
-    
     # 2. 批量解析
     print(f"\n🤖 开始 LLM 批量解析...")
     df_parsed = batch_parse_fields(
         df,
         date_str_from_file=date_str_from_file,
-        strict_date_filter=strict_date_filter
+        strict_date_filter=strict_date_filter,
+        assist_known_names=all_known_names
     )
     
     # 3. 生成统计
@@ -722,6 +750,10 @@ def gen_names():
     with open(known_names_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(names))
         
+
+ 
+
+ 
 import time 
 
 if __name__ == '__main__':

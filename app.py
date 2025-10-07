@@ -97,11 +97,10 @@ def upload_files():
         # 创建临时文件
         temp_dir = tempfile.mkdtemp()
         
-        # 保存全量名单
-        name_path = os.path.join(temp_dir, 'known_names_select.txt')
+        # 读取用户上传的全量名单
         name_content = name_file.read().decode('utf-8')
-        with open(name_path, 'w', encoding='utf-8') as f:
-            f.write(name_content)
+        known_names_from_ui = [line.strip() for line in name_content.splitlines() if line.strip()]
+        print(f"📋 用户上传名单: {len(known_names_from_ui)} 个")
         
         # 保存Excel文件
         excel_path = os.path.join(temp_dir, 'input.xlsx')
@@ -153,7 +152,8 @@ def upload_files():
                     'output_path': output_path,
                     'date_str_from_file': date_str_from_ui,
                     'strict_date_filter': STRICT_DATE_FILTER,
-                    'selected_halls': selected_halls
+                    'selected_halls': selected_halls,
+                    'known_names_from_ui': known_names_from_ui
                 }
             )
         except FunctionTimedOut:
