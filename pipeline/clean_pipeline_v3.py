@@ -8,34 +8,31 @@ import json
 import time
 import sys
 import os
+import tempfile
+import traceback
+import re
+import io
 from pathlib import Path
 from typing import Dict, List, Any
+from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_fixed
+from openpyxl import Workbook, load_workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import PatternFill, Font, Alignment
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.llm.llm_client import _get_client
 from pipeline.prompts_v3 import PROMPT_BATCH
-from global_config import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, COLS_CONFIG
-import traceback 
+from global_config import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, COLS_CONFIG, STRICT_DATE_FILTER 
 
 
 
 def get_temp_path(filename):
-    import tempfile
     temp_dir = tempfile.gettempdir()
     return os.path.join(temp_dir, filename)
     
-# 读取已知人名清单
-with open('known_names_select.txt', 'r', encoding='utf-8') as f:
-    known_names_select = f.read().splitlines()
-    known_names_select = [name.strip() for name in known_names_select if name.strip()]
-known_names_select = list(set(known_names_select))
-
-print(f"✅ 已加载 {len(known_names_select)} 个已知人名")
-print(f"人名清单: {known_names_select[:10]}..." if len(known_names_select) > 10 else f"人名清单: {known_names_select}")
-
 
 
 model_client = _get_client(model_name=CURRENT_MODEL)
@@ -362,7 +359,7 @@ def apply_color_by_value(excel_path, value_color_mapping, output_path=None):
 
 
 
-def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str):
+def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str, all_known_names: List[str]):
     """
     保存清洗后的数据（带公式版本，统计表在右侧）
     
@@ -370,10 +367,6 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str):
         df: 包含解析结果的数据框
         output_path: 输出文件路径
     """
-    from openpyxl import Workbook, load_workbook
-    from openpyxl.utils import get_column_letter
-    from openpyxl.styles import PatternFill, Font, Alignment
-    import io
 
     # 按 COLS_CONFIG 重新排列列
     col_order = [col['col_name'] for col in COLS_CONFIG if col['col_name'] in df.columns]
@@ -488,7 +481,7 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str):
         {'cell_value': '9', 'color_code': 'FF0000','mode': 'exact'},
     ]
     for stat_name in sorted_names:
-        if normalize_ascii_lower(stat_name) not in known_names_select:
+        if normalize_ascii_lower(stat_name) not in all_known_names:
             cell_config_list.append({'cell_value': stat_name, 'color_code': 'FF0000','mode': 'contains_value'})
 
     apply_color_by_value(path_step3, cell_config_list, output_path=output_path)
@@ -543,9 +536,7 @@ def generate_statistics(df: pd.DataFrame):
     need_check = paimai_low + paimai_medium
     print(f"\n建议优先检查: 约 {need_check} 条记录（排麦低+中置信度）")
 
-from pathlib import Path
-# ========== 主流程 ==========
-import re 
+# ========== 主流程 ========== 
 def extract_chinese(text):
     return re.sub(r'[^\u4e00-\u9fa5]', '', text)
 
@@ -638,7 +629,7 @@ def process_one_file(
     
     # 4. 仅保存带公式版本并生成着色版本（中间产物）
     print(f"\n📊 保存带公式版本并着色...")
-    save_cleaned_data_with_formula(df_parsed, str(output_path))
+    save_cleaned_data_with_formula(df_parsed, str(output_path), all_known_names)
 
     # 在最终路径上已完成写入与着色
     
@@ -651,8 +642,6 @@ def process_one_file(
     print(f"   - 基于 CONFIG.COLS_CONFIG 配置着色")
     print(f"\n💡 说明：仅输出带颜色版本，便于直接人工校验")
 
-
-from datetime import datetime 
 
 def load_json_from_llm_completion(response_str):
     response = response_str.strip()
@@ -999,8 +988,6 @@ def gen_names():
  
 
  
-import time 
-
 if __name__ == '__main__':
     # gen_names()
     # raise 
