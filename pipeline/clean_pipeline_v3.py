@@ -565,7 +565,8 @@ def gen_all_known_names(known_names_from_ui: List[str], selected_halls: List[str
 
     
     all_names = []
-    all_names.extend(known_names_from_ui)
+    if known_names_from_ui:
+        all_names.extend(known_names_from_ui)
     all_names.extend(known_names_from_local)
     all_names = list(set(all_names))
     return all_names

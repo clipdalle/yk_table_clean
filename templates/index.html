@@ -43,14 +43,59 @@
         .header p {
             font-size: 1.1em;
             opacity: 0.9;
+            margin-bottom: 10px;
+        }
+
+        .optional-notice {
+            font-size: 0.9em;
+            opacity: 0.7;
+            font-style: italic;
         }
         
         .content {
             padding: 40px;
         }
+
+
+        .toggle-advanced {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 8px 16px;
+            cursor: pointer;
+            text-align: center;
+            font-size: 13px;
+            color: #6c757d;
+            transition: all 0.3s ease;
+            margin: 0;
+            float: right;
+            margin-bottom: 15px;
+        }
+
+        .toggle-advanced:hover {
+            background: #e9ecef;
+            border-color: #dee2e6;
+        }
+
+        .toggle-advanced::after {
+            content: "▼";
+            margin-left: 8px;
+            font-size: 12px;
+        }
+
+        .toggle-advanced.expanded::after {
+            content: "▲";
+        }
         
         .upload-section {
             margin-bottom: 30px;
+            overflow: hidden;
+        }
+
+        .upload-section::after {
+            content: "";
+            display: table;
+            clear: both;
         }
         
         .upload-grid {
@@ -204,6 +249,12 @@
         .download-btn:hover {
             transform: translateY(-2px);
         }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
         
         .stats {
             display: grid;
@@ -266,6 +317,25 @@
                 grid-template-columns: 1fr;
                 gap: 20px;
             }
+
+            .upload-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .upload-section > div {
+                flex-direction: column;
+                align-items: stretch !important;
+            }
+
+            .toggle-advanced {
+                float: none !important;
+                margin-bottom: 10px !important;
+                margin-top: 0 !important;
+            }
+
+            .upload-grid {
+                grid-template-columns: 1fr !important;
+            }
         }
         
         .settings-item h4 {
@@ -326,24 +396,31 @@
         </div>
         
         <div class="content">
-            <form id="uploadForm" enctype="multipart/form-data">
+            <form id="uploadForm" enctype="multipart/form-data" novalidate>
                 <div class="upload-section">
-                    <h3>📁 上传文件</h3>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3>📁 上传文件</h3>
+                        <button type="button" class="toggle-advanced" onclick="toggleAdvancedOptions()">
+                            显示辅助选项
+                        </button>
+                    </div>
+
                     <div class="upload-grid">
-                        <div class="upload-box" onclick="document.getElementById('nameList').click()">
-                            <input type="file" id="nameList" name="name_list" class="file-input" accept=".txt" required>
-                            <h4>📋 全量名单</h4>
-                            <p style="font-size: 13px; color: #666;">选择 .txt 文件</p>
-                            <button type="button" class="upload-btn">选择文件</button>
-                            <div id="nameListInfo" class="file-info"></div>
-                        </div>
-                        
                         <div class="upload-box" onclick="document.getElementById('excelFile').click()">
-                            <input type="file" id="excelFile" name="excel_file" class="file-input" accept=".xlsx,.xls" required>
+                            <input type="file" id="excelFile" name="excel_file" class="file-input" accept=".xlsx,.xls">
                             <h4>📊 麦序Excel</h4>
-                            <p style="font-size: 13px; color: #666;">选择 .xlsx 文件</p>
                             <button type="button" class="upload-btn">选择文件</button>
+                            <p style="font-size: 13px; color: #666;">选择 .xlsx 文件</p>
                             <div id="excelFileInfo" class="file-info"></div>
+                        </div>
+
+                        <div class="upload-box advanced-option" style="display: none;">
+                            <input type="file" id="nameList" name="name_list" class="file-input" accept=".txt">
+                            <h4>📋 辅助名单（可选）</h4>
+                            <button type="button" class="upload-btn" style="margin-bottom: 10px;" onclick="document.getElementById('nameList').click()">选择文件</button>
+                            <p style="font-size: 13px; color: #666; line-height: 1.6; margin: 8px 0 15px 0;">💡 系统内部已经维护了一部分人员名单数据库，如果您还有新增人员时，可以选择上传辅助名单文件（.txt格式），系统会自动将您提供的辅助名单与内部数据库合并，这样可以显著提升AI对人员名单的识别准确率和处理效率</p>
+                            <button type="button" class="download-btn" onclick="downloadSystemNames()">下载系统当前名单</button>
+                            <div id="nameListInfo" class="file-info"></div>
                         </div>
                     </div>
                 </div>
@@ -353,7 +430,7 @@
                     <div class="settings-grid">
                         <div class="settings-item">
                             <h4>📅 选择日期</h4>
-                            <input type="date" id="selectedDate" name="selected_date" class="date-input" required>
+                            <input type="date" id="selectedDate" name="selected_date" class="date-input">
                         </div>
                         
                         <div class="settings-item">
@@ -403,10 +480,44 @@
         document.getElementById('nameList').addEventListener('change', function(e) {
             handleFileSelect(e, 'nameListInfo');
         });
-        
+
         document.getElementById('excelFile').addEventListener('change', function(e) {
             handleFileSelect(e, 'excelFileInfo');
         });
+
+        // 切换辅助选项显示
+        function toggleAdvancedOptions() {
+            const advancedOption = document.querySelector('.advanced-option');
+            const toggleBtn = document.querySelector('.toggle-advanced');
+
+            if (advancedOption.style.display === 'block') {
+                advancedOption.style.display = 'none';
+                toggleBtn.classList.remove('expanded');
+                toggleBtn.innerHTML = '显示辅助选项';
+            } else {
+                advancedOption.style.display = 'block';
+                toggleBtn.classList.add('expanded');
+                toggleBtn.innerHTML = '隐藏辅助选项';
+            }
+        }
+
+        // 下载系统名单
+        function downloadSystemNames() {
+            // 添加趣味验证
+            const answer = prompt('🎯 验证问题：谁是世界上最美的人？');
+
+            if (answer === null) {
+                // 用户取消了验证
+                return;
+            }
+
+            if (answer.trim() === '我我我') {
+                alert('😏 哈哈，答案是正确的！开始下载...');
+                window.location.href = '/download_system_names';
+            } else {
+                alert('❌ 验证失败！再来！ 😜');
+            }
+        }
         
         function handleFileSelect(event, infoId) {
             const file = event.target.files[0];
@@ -426,16 +537,31 @@
         // 表单提交
         document.getElementById('uploadForm').addEventListener('submit', function(e) {
             e.preventDefault();
+
+            // 阻止默认的HTML5表单验证
+            e.stopPropagation();
             
             const formData = new FormData(this);
             
             // 获取文件信息
             const excelFile = document.getElementById('excelFile').files[0];
             const selectedDate = document.getElementById('selectedDate').value;
-            
+
             // 获取选中的厅号（FormData会自动收集同名checkbox的值）
             const selectedHalls = formData.getAll('hall');
-            
+
+            // 校验Excel文件必须选择
+            if (!excelFile) {
+                alert('⚠️ 请先选择麦序Excel文件');
+                return;
+            }
+
+            // 校验日期必须选择
+            if (!selectedDate) {
+                alert('⚠️ 请选择处理日期');
+                return;
+            }
+
             // 校验厅号必须选择
             if (selectedHalls.length === 0) {
                 alert('⚠️ 请至少选择一个厅号');
@@ -455,7 +581,7 @@
             // 显示处理信息
             const hallsText = selectedHalls.length > 0 ? selectedHalls.join('、') : '未选择';
             const loadingMessage = `正在处理数据，请稍候...<br><br>
-📁 当前文件名：${excelFile.name}<br>
+📊 麦序文件：${excelFile.name}<br>
 📅 相关日期：${selectedDate}<br>
 🏛️ 选择厅号：${hallsText}<br><br>
 ⏱️ 预计等待时间：30-60秒`;

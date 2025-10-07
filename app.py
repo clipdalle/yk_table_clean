@@ -16,7 +16,9 @@ from vercel_blob import blob_store as VercelBlobStore
 
 # 添加 pipeline 模块路径
 sys.path.append('pipeline')
-import os 
+import os
+import zipfile
+import shutil
 from global_config import STRICT_DATE_FILTER
 # 导入核心业务逻辑
 from pipeline.clean_pipeline_v3 import process_one_file, get_date_str_from_text
@@ -78,29 +80,55 @@ def get_date_from_file(excel_filename):
     """
     return get_date_str_from_text(excel_filename)
 
+
+def get_names_from_name_file(name_file):
+    """
+    从上传的全量名单文件中提取人名列表
+
+    Args:
+        name_file: Flask上传的文件对象
+
+    Returns:
+        List[str]: 人名列表，如果文件无效则返回空列表
+    """
+    if not name_file or name_file.filename == '':
+        return []
+
+    if not allowed_file(name_file.filename):
+        print("❌ 全量名单文件格式不支持")
+        return []
+
+    name_content = name_file.read().decode('utf-8')
+    known_names = [line.strip() for line in name_content.splitlines() if line.strip()]
+    print(f"📋 成功读取全量名单: {len(known_names)} 个")
+    return known_names
+ 
+
 @app.route('/upload', methods=['POST'])
 def upload_files():
     try:
         # 检查文件是否存在
-        if 'name_list' not in request.files or 'excel_file' not in request.files:
-            return jsonify({'error': '请上传全量名单和Excel文件'}), 400
-        
-        name_file = request.files['name_list']
+        if 'excel_file' not in request.files:
+            return jsonify({'error': '请上传Excel文件'}), 400
+
         excel_file = request.files['excel_file']
-        
-        if name_file.filename == '' or excel_file.filename == '':
-            return jsonify({'error': '请选择文件'}), 400
-        
-        if not allowed_file(name_file.filename) or not allowed_file(excel_file.filename):
-            return jsonify({'error': '文件格式不支持'}), 400
-        
+
+        if excel_file.filename == '':
+            return jsonify({'error': '请选择Excel文件'}), 400
+
+        if not allowed_file(excel_file.filename):
+            return jsonify({'error': 'Excel文件格式不支持'}), 400
+
         # 创建临时文件
         temp_dir = tempfile.mkdtemp()
-        
-        # 读取用户上传的全量名单
-        name_content = name_file.read().decode('utf-8')
-        known_names_from_ui = [line.strip() for line in name_content.splitlines() if line.strip()]
-        print(f"📋 用户上传名单: {len(known_names_from_ui)} 个")
+
+        # 处理全量名单（可选）
+        known_names_from_ui = []
+        if 'name_list' in request.files:
+            name_file = request.files['name_list']
+            known_names_from_ui = get_names_from_name_file(name_file)
+
+        print(f"📋 最终使用名单: {len(known_names_from_ui)} 个")
         
         # 保存Excel文件
         excel_path = os.path.join(temp_dir, 'input.xlsx')
@@ -227,6 +255,38 @@ def download_file(filename):
             return jsonify({'error': '文件不存在'}), 404
     except Exception as e:
         return jsonify({'error': f'下载失败: {str(e)}'}), 500
+
+@app.route('/download_system_names')
+def download_system_names():
+    """下载系统名单文件夹（打包为zip）"""
+    try:
+        # 检查 name_list 文件夹是否存在
+        name_list_dir = os.path.join(os.getcwd(), 'name_list')
+        if not os.path.exists(name_list_dir):
+            return jsonify({'error': '系统名单文件夹不存在'}), 404
+
+        # 创建临时zip文件
+        temp_dir = tempfile.mkdtemp()
+        zip_path = os.path.join(temp_dir, 'system_names.zip')
+
+        # 打包 name_list 文件夹
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(name_list_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, name_list_dir)
+                    zipf.write(file_path, arcname)
+
+        # 发送文件
+        return send_file(
+            zip_path,
+            as_attachment=True,
+            download_name='system_names.zip',
+            mimetype='application/zip'
+        )
+
+    except Exception as e:
+        return jsonify({'error': f'打包下载失败: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
