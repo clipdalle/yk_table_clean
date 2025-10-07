@@ -884,7 +884,6 @@ def process_ahead(excel_path: str, selected_halls: List[str]) -> Dict[str, Any]:
     # 3. 校验日期字段
     print('tolist-----------')
     print(df_filtered_by_halls['日期（必填）'].tolist())
-    df_filtered_by_halls.to_csv('go.csv')
 
     date_res = check_date_for_df(df_filtered_by_halls)
 
