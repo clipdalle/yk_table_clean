@@ -9,9 +9,7 @@ import tempfile
 import os
 import sys
 from pathlib import Path
-import signal
-import threading
-import time
+from func_timeout import func_timeout, FunctionTimedOut
 # Vercel Blob是可选的，生产环境会自动提供
 
 from vercel_blob import blob_store as VercelBlobStore
@@ -80,29 +78,6 @@ def get_date_from_file(excel_filename):
     """
     return get_date_str_from_text(excel_filename)
 
-def process_with_timeout(excel_path, output_path, date_str_from_file, timeout_seconds=120):
-    """带超时的处理函数"""
-    result = {'success': False, 'error': None}
-    
-    def target():
-        process_one_file(
-            excel_path=excel_path,
-            output_path=output_path,
-            date_str_from_file=date_str_from_file,
-            strict_date_filter=STRICT_DATE_FILTER
-        )
-        result['success'] = True
-    
-    thread = threading.Thread(target=target)
-    thread.daemon = True
-    thread.start()
-    thread.join(timeout_seconds)
-    
-    if thread.is_alive():
-        result['error'] = f'处理超时（{timeout_seconds}秒），请尝试减少数据量或稍后重试'
-    
-    return result
-
 @app.route('/upload', methods=['POST'])
 def upload_files():
     try:
@@ -140,6 +115,14 @@ def upload_files():
         if not date_str_from_ui:
             return jsonify({'error': '请选择日期'}), 400
         
+        # 获取选中的厅号（原生FormData方式）
+        selected_halls = request.form.getlist('hall')
+        print(f"🏛️ 选中的厅号: {selected_halls}")
+        
+        # 校验厅号必须选择
+        if not selected_halls or len(selected_halls) == 0:
+            return jsonify({'error': '请至少选择一个厅号'}), 400
+        
         date_str_from_file = get_date_from_file(excel_file.filename)
         
         # 日期一致性校验
@@ -148,28 +131,39 @@ def upload_files():
                 return jsonify({
                     'error': f'日期不一致！\n\n从日期控件您选择的日期是：{date_str_from_ui}\n从文件名 "{excel_file.filename}"，我们得到的日期是：{date_str_from_file}\n\n两个日期不一致，请您再检查一下'
                 }), 400
-        
-  
         # 检测环境并设置合适的超时时间
         is_vercel = os.getenv('VERCEL') == '1'
-        timeout_seconds = 120 if is_vercel else 120  # Vercel环境使用更短的超时
+        timeout_seconds = 120 if is_vercel else 120
         
         print(f"🌍 环境检测: {'Vercel生产环境' if is_vercel else '本地开发环境'}")
         print(f"⏱️ 超时设置: {timeout_seconds}秒")
         
-        # 使用带超时的处理函数
-        process_result = process_with_timeout(
-            excel_path=excel_path,
-            output_path=output_path,
-            date_str_from_file=date_str_from_ui,
-            timeout_seconds=timeout_seconds
-        )
+        # 读取原始数据获取行数
+        original_df = pd.read_excel(excel_path)
+        original_rows = len(original_df)
+        print(f"📊 原始数据行数: {original_rows}")
         
-        if not process_result['success']:
-            return jsonify({'error': process_result['error']}), 500
+        # 使用 func_timeout 实现超时控制
+        try:
+            func_timeout(
+                timeout_seconds,
+                process_one_file,
+                kwargs={
+                    'excel_path': excel_path,
+                    'output_path': output_path,
+                    'date_str_from_file': date_str_from_ui,
+                    'strict_date_filter': STRICT_DATE_FILTER,
+                    'selected_halls': selected_halls
+                }
+            )
+        except FunctionTimedOut:
+            return jsonify({
+                'error': f'处理超时（{timeout_seconds}秒），请尝试减少数据量或稍后重试'
+            }), 500
         
         # 读取处理结果
         result_df = pd.read_excel(output_path)
+        processed_rows = len(result_df)
         
         # 处理 NaN 值，转换为 None 以便 JSON 序列化
         result_df = result_df.fillna('')
@@ -190,10 +184,16 @@ def upload_files():
         
         return jsonify({
             'success': True,
-            'message': f'处理完成！共处理 {len(result_df)} 条记录',
+            'message': f'处理完成！共处理 {processed_rows} 条记录',
             'download_url': f'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{file_base64}',
             'file_id': file_id,
-            'filename': output_filename
+            'filename': output_filename,
+            'stats': {
+                'selected_halls': selected_halls,
+                'original_rows': original_rows,
+                'processed_rows': processed_rows,
+                'selected_date': date_str_from_ui
+            }
         })
         
     except Exception as e:

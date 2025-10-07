@@ -5,3 +5,4 @@ tenacity
 google-genai
 requests
 vercel-blob
+func-timeout

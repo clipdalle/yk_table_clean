@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.llm.llm_client import _get_client
 from pipeline.prompts_v3 import PROMPT_BATCH
-from global_config import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, HALL_FILTER, COLS_CONFIG
+from global_config import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, COLS_CONFIG
 
 
 
@@ -553,12 +553,15 @@ def extract_chinese(text):
         raise ValueError(text)
 
 
-def process_one_file(excel_path: str, output_path: str, date_str_from_file: str, strict_date_filter: bool = False):
+def process_one_file(excel_path: str, output_path: str, date_str_from_file: str, strict_date_filter: bool = False, selected_halls: list = None):
     """处理单个 Excel 文件并输出最终着色文件
 
     Args:
         excel_path: 输入 Excel 路径
         output_path: 最终着色文件路径（必填）。
+        date_str_from_file: 日期字符串
+        strict_date_filter: 是否严格按日期筛选
+        selected_halls: 选择的厅号列表，用于筛选数据
     """
     output_dir = Path(output_path).parent
     # 确保只在temp目录中创建目录
@@ -581,13 +584,15 @@ def process_one_file(excel_path: str, output_path: str, date_str_from_file: str,
     df['厅名中文'] = df['厅号（必填）'].apply(extract_chinese)
     print(f"   - 原始记录数: {len(df)}")
         
-    # 筛选特定厅号（如果配置了筛选条件）
-    if HALL_FILTER:
-        df = df[df['厅号（必填）'].str.contains(HALL_FILTER, na=False)]
-        print(f"   - 筛选条件: {HALL_FILTER}")
-        print(f"✅ 读取完成，筛选后共 {len(df)} 条记录")
-    else:
-        print(f"✅ 读取完成，未筛选，共 {len(df)} 条记录")
+    # 筛选特定厅号（必须选择厅号）
+    if not selected_halls or len(selected_halls) == 0:
+        raise ValueError("❌ 错误：必须至少选择一个厅号进行处理")
+    
+    # 将厅号列表拼接成正则表达式，例如：['醉春色', '百媚生'] -> '醉春色|百媚生'
+    hall_filter = '|'.join(selected_halls)
+    print(f"   - 使用选择的厅号筛选: {hall_filter}")
+    df = df[df['厅号（必填）'].str.contains(hall_filter, na=False)]
+    print(f"✅ 读取完成，筛选后共 {len(df)} 条记录")
 
  
     
@@ -734,5 +739,6 @@ if __name__ == '__main__':
             continue 
 
         date_str_from_file = get_date_str_from_text(p.stem)
-        process_one_file(p, output_path=output_path, date_str_from_file=date_str_from_file, process_one_file=STRICT_DATE_FILTER)
+        from global_config import STRICT_DATE_FILTER
+        process_one_file(p, output_path=output_path, date_str_from_file=date_str_from_file, strict_date_filter=STRICT_DATE_FILTER)
         time.sleep(1)
