@@ -658,13 +658,26 @@
             resultsDiv.classList.add('show');
         }
         
-        function displayError(message) {
+        function displayError(message, details = null, type = null) {
             const resultsDiv = document.getElementById('results');
-            // 将换行符转换为HTML换行标签
-            const formattedMessage = message.replace(/\n/g, '<br>');
+
+            let formattedMessage = '';
+
+            // 处理不同类型的错误信息
+            if (Array.isArray(message)) {
+                // 如果是数组，逐行显示
+                formattedMessage = message.map(error => `❌ ${error}`).join('<br>');
+            } else if (typeof message === 'string' && message.includes('\n')) {
+                // 如果是包含换行符的字符串
+                formattedMessage = message.split('\n').map(error => `❌ ${error}`).join('<br>');
+            } else {
+                // 普通字符串
+                formattedMessage = `❌ ${message}`;
+            }
+
             resultsDiv.innerHTML = `
                 <div class="error">
-                    ❌ ${formattedMessage}
+                    ${formattedMessage}
                 </div>
             `;
             resultsDiv.classList.add('show');

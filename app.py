@@ -103,6 +103,7 @@ def get_names_from_name_file(name_file):
     print(f"📋 成功读取全量名单: {len(known_names)} 个")
     return known_names
  
+from pipeline.clean_pipeline_v3 import process_ahead
 
 @app.route('/upload', methods=['POST'])
 def upload_files():
@@ -151,7 +152,7 @@ def upload_files():
             return jsonify({'error': '请至少选择一个厅号'}), 400
         
         date_str_from_file = get_date_from_file(excel_file.filename)
-        
+ 
         # 日期一致性校验
         if date_str_from_file:  # 如果文件名能提取到日期
             if date_str_from_ui != date_str_from_file:  # 两个日期不一致
@@ -169,7 +170,12 @@ def upload_files():
         original_df = pd.read_excel(excel_path)
         original_rows = len(original_df)
         print(f"📊 原始数据行数: {original_rows}")
-        
+
+        # 预校验：在正式处理前检查数据质量
+        ahead_result = process_ahead(excel_path, selected_halls)
+        if not ahead_result['valid']:
+            return jsonify({'error': ahead_result['errors']}), 400
+
         # 使用 func_timeout 实现超时控制
         try:
             func_timeout(

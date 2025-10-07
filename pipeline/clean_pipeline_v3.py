@@ -9,7 +9,7 @@ import time
 import sys
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Any
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 # 添加父目录到路径
@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pipeline.llm.llm_client import _get_client
 from pipeline.prompts_v3 import PROMPT_BATCH
 from global_config import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, COLS_CONFIG
+import traceback 
 
 
 
@@ -36,8 +37,11 @@ print(f"✅ 已加载 {len(known_names_select)} 个已知人名")
 print(f"人名清单: {known_names_select[:10]}..." if len(known_names_select) > 10 else f"人名清单: {known_names_select}")
 
 
-# ========== 核心函数 ==========
-import traceback 
+
+model_client = _get_client(model_name=CURRENT_MODEL)
+
+
+
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 def parse_batch(batch_df: pd.DataFrame, assist_known_names: List[str]) -> List[Dict]:
@@ -543,10 +547,7 @@ from pathlib import Path
 # ========== 主流程 ==========
 import re 
 def extract_chinese(text):
-    try:
-        return re.sub(r'[^\u4e00-\u9fa5]', '', text)
-    except:
-        raise ValueError(text)
+    return re.sub(r'[^\u4e00-\u9fa5]', '', text)
 
 
 
@@ -623,7 +624,6 @@ def process_one_file(
     df = df[df['厅号（必填）'].str.contains(hall_filter, na=False)]
     print(f"✅ 读取完成，筛选后共 {len(df)} 条记录")
 
- 
     # 2. 批量解析
     print(f"\n🤖 开始 LLM 批量解析...")
     df_parsed = batch_parse_fields(
@@ -654,7 +654,254 @@ def process_one_file(
 
 from datetime import datetime 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
+def load_json_from_llm_completion(response_str):
+    response = response_str.strip()
+    if response.startswith('```json'):
+        response = response[7:]
+    if response.startswith('```'):
+        response = response[3:]
+    if response.endswith('```'):
+        response = response[:-3]
+    response = response.strip()
+    return json.loads(response)
+
+
+def parse_json_markdown(json_markdown: str) -> str:
+    """从Markdown格式中提取JSON字符串"""
+    #match = re.search(r"```json\s*(.*?)\s*```", json_markdown, re.DOTALL)
+    match = re.search(r"```(json)?(.*)```", json_markdown, re.DOTALL)
+    json_string = match.group(2)
+    return json.loads(json_string)
+
+
+def is_legal_date_str(date_str: str) -> bool:
+    prompt = f"""
+    当前日期：{datetime.now().strftime('%Y年%m月')}
+
+    你是一个日期字符串合法性判断专家。  
+    输入是一个人类手写的日期字符串，可能包含简单笔误但仍可理解为合法日期，或因错误而无法理解为非法日期。  
+
+    **合法日期定义**：  
+    1. 可明确解析为有效日期，即使包含简单笔误，例如：  
+       - "2025年10月  28日" → 可解析为 "2025年10月28日"  
+       - "2025年10.28日" → 可解析为 "2025年10月28日"  
+       - "2025年1028" → 可解析为 "2025年10月28日"  
+       - "20251028" → 可解析为 "2025年10月28日"  
+
+    **非法日期定义**：  
+    1. 日期有歧义，无法明确解析，例如：  
+       - "2025年9223" → 无法判断是9月22日还是9月23日  
+    2. 日期明显无效，例如：  
+       - "2025年13月28日" → 13月不存在  
+    3. 日期超出合理范围（早于2000年或晚于当前年份+3年），例如：  
+       - "1999年10月28日" → 早于2000年  
+       - "2028年10月28日" → 晚于当前年份+3年（{int(datetime.now().strftime('%Y')) + 3}年）  
+
+    **任务**：  
+    判断输入日期字符串 `{date_str}` 是否为合法日期。  
+    返回 JSON 格式结果：  
+    ```json
+    {{
+        "is_legal": true,
+        "reason": "日期字符串是合法的日期字符串"
+    }}
+    ```
+    """
+
+    
+    response = model_client.get_completion(prompt)
+    print(response)
+    response = parse_json_markdown(response)
+    return response
+ 
+def test_illegal():
+    dir_path = r'C:\Users\jizai\Documents\xwechat_files\wxid_loq7ea805m2f21_5d13\msg\file\2025-10\daily_data_1006\daily_data_1006'
+    for p in Path(dir_path).glob('*.xlsx'):
+        if 'output' in p.stem:
+            continue
+        df = pd.read_excel(p, sheet_name=0)
+        date_list = df['日期（必填）'].tolist()
+        date_list = list(set(date_list))
+        for date_str in date_list:
+            res = is_legal_date_str(date_str)
+            print(p)
+            print(date_str)
+            print(res)
+            print('----------------------------')
+            if not res['is_legal']:
+                print(date_str)
+                print(res['reason'])
+        raise ValueError()
+
+
+def is_legal_date_batch(date_json: str) -> list:
+    prompt = f"""
+    当前日期：{datetime.now().strftime('%Y年%m月')}
+
+    你是一个日期字符串合法性判断专家。  
+    输入是一个 JSON 格式的 Excel 数据，包含人类手写的日期字符串和对应的行号。日期可能包含简单笔误但仍可解析为合法日期，或因错误被判定为非法日期。  
+    你的任务是识别输入中所有非法日期的行号、原始日期文本和非法原因，并返回这些信息。
+
+    **合法日期定义**：  
+    可明确解析为有效日期（符合公历规则），即使包含简单笔误，例如：  
+    - "2025年10月  28日" → 解析为 "2025年10月28日"  
+    - "2025年10.28日" → 解析为 "2025年10月28日"  
+    - "2025年1028" → 解析为 "2025年10月28日"  
+    - "20251028" → 解析为 "2025年10月28日"  
+    - "2025年10月5号" → 解析为 "2025年10月5日"  
+
+    **非法日期定义**：  
+    1. 日期有歧义，无法明确解析，例如：  
+       - "2025年9223" → 无法判断是9月22日还是9月23日  
+    2. 日期明显无效（例如月份或日期超出有效范围），例如：  
+       - "2025年13月28日" → 13月不存在  
+       - "2025年2月30日" → 2月无30日  
+    3. 日期超出合理范围（早于2000年或晚于当前年份+3年，即 {int(datetime.now().strftime('%Y')) + 3}年），例如：  
+       - "1999年10月28日" → 早于2000年  
+       - "2028年10月28日" → 晚于 {int(datetime.now().strftime('%Y')) + 3}年  
+
+    **输入格式**：  
+    JSON 数组，每项包含行号和日期字符串，例如：  
+    ```json
+    [
+        {{ "行号": 44, "日期（必填）": "2025年9月21日" }},
+        {{ "行号": 45, "日期（必填）": "2025年9117日" }}
+    ]
+    ```
+
+    **任务， 现在开始回答我的问题，json格式返回**：  
+    检查输入 `{date_json}` 中的每个日期字符串，找出所有非法日期。  
+    - 如果存在非法日期，返回包含每项非法日期的行号、原始日期文本和原因的 JSON 数组。  
+    - 如果没有非法日期，返回空数组 `[]`。  
+
+    **返回格式**：  
+    ```json
+    [
+        {{
+            "行号": int,
+            "日期（必填）": "原始非法日期文本",
+            "reason": "判定为非法的原因"
+        }}
+    ]
+    ```
+
+    **示例**：  
+    输入：  
+    ```json
+    [
+        {{ "行号": 44, "日期（必填）": "2025年9月21日" }},
+        {{ "行号": 45, "日期（必填）": "2025年9117日" }}
+    ]
+    ```  
+    输出：  
+    ```json
+    [
+        {{
+            "行号": 45,
+            "日期（必填）": "2025年9117日",
+            "reason": "日期有歧义，无法解析为有效日期"
+        }}
+    ]
+    ```  
+    输入（全合法）：  
+    ```json
+    [
+        {{ "行号": 44, "日期（必填）": "2025年9月21日" }}
+    ]
+    ```  
+    输出：  
+    ```json
+    []
+    ```
+    """
+    response = model_client.get_completion(prompt)
+    try:
+        response = parse_json_markdown(response)
+        return response
+    except:
+        raise ValueError(prompt, response)
+
+def check_date_for_df(df: pd.DataFrame):
+    df['行号'] = df.index + 2
+    data = df[['行号', '日期（必填）']].to_dict(orient='records')
+    data = json.dumps(data, ensure_ascii=False, indent=2)
+
+    res = is_legal_date_batch(data)
+    print('-----------------日期检测返回结果----------------')
+    print(res)
+    print('---------------------------------------------')
+    if res:
+        summary_text = '上传文件的日期[必填]字段有问题，请先解决日期问题再上传处理：\n'
+        for item in res:
+            row_name = item['行号']
+            date_value = item['日期（必填）']
+            reason = item['reason']
+            summary_text += f"数据第{row_name}行日期有问题: {date_value} {reason}\n"
+        return {
+            'is_legal': False,
+            'summary_text': summary_text
+        }
+    else:
+        return {
+            'is_legal': True,
+            'summary_text': ''
+        }
+    
+ 
+
+def process_ahead(excel_path: str, selected_halls: List[str]) -> Dict[str, Any]:
+    """
+    预校验函数，只校验数据量和日期格式
+
+    Args:
+        excel_path: Excel文件路径
+        selected_halls: 选择的厅号列表
+
+    Returns:
+        Dict: 包含校验结果和错误信息的字典
+    """
+ 
+    # 1. 读取Excel文件
+    df = pd.read_excel(excel_path, sheet_name=0)
+
+    # 2. 检查筛选后的数据是否为空
+    if not selected_halls or len(selected_halls) == 0:
+        return {
+            'valid': False,
+            'errors': ["必须至少选择一个厅号进行处理"]
+        }
+
+    # 拼接厅号筛选条件
+    hall_filter = '|'.join(selected_halls)
+    df_filtered_by_halls = df[df['厅号（必填）'].str.contains(hall_filter, na=False)]
+
+    if len(df_filtered_by_halls) == 0:
+        return {
+            'valid': False,
+            'errors': [f"筛选后的数据为空！Excel文件中未找到包含以下厅号的数据: {', '.join(selected_halls)}"]
+        }
+
+    # 3. 校验日期字段
+    print('tolist-----------')
+    print(df_filtered_by_halls['日期（必填）'].tolist())
+    df_filtered_by_halls.to_csv('go.csv')
+
+    date_res = check_date_for_df(df_filtered_by_halls)
+
+    if not date_res['is_legal']:
+        # 将错误信息格式化为前端友好的格式
+        error_lines = [line.strip() for line in date_res['summary_text'].strip().split('\n') if line.strip()]
+        return {
+            'valid': False,
+            'errors': error_lines
+        }
+
+    return {
+        'valid': True,
+        'errors': []
+    }
+
+
 def get_date_str_from_text(text):
     PROMPT_DATE_EXTRACT = f'''
     当前时间是: {datetime.now().strftime('%Y年')}
@@ -718,9 +965,6 @@ def get_date_str_from_text(text):
     except Exception as e:
         print(f"日期提取出错: {e}")
         return ''
-
-
-model_client = _get_client(model_name=CURRENT_MODEL)
 
 
 def gen_names():
