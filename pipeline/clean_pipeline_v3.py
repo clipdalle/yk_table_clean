@@ -421,6 +421,7 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str, all_known
         # 按字母顺序排序
         all_names = dudup_names(all_names)
         sorted_names = sorted(all_names)
+ 
         
         # 统计表放在右侧，空两列后开始
         stats_start_col = len(headers) + 3  # 空两列
@@ -739,6 +740,7 @@ def is_legal_date_batch(date_json: str) -> list:
     - "20251028" → 解析为 "2025年10月28日"  
     - "2025年10月5号" → 解析为 "2025年10月5日"  
     - "9.13" → 解析为 "2025年9月13日"  
+    - "2025.10.1补" 解析为 "2025年10月1日"  
 
     **非法日期定义**：  
     1. 日期有歧义，无法明确解析，例如：  
