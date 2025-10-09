@@ -35,8 +35,8 @@ SILICONFLOW_MODEL = 'deepseek-ai/DeepSeek-V3.1-Terminus'#'deepseek-ai/DeepSeek-V
 # ========== 模型选择 ==========
 # 可选值：'gemini' 或 'glm4' 或者 'random_gemini' 或者 "silicon_ds_v3"
 CURRENT_MODEL = 'glm4' #'silicon_ds_v3'  # 当前使用的模型
-CURRENT_MODEL = 'silicon_ds_omni' #deepseek-ai/DeepSeek-R1
-CURRENT_MODEL = 'silicon_qwen3_80B'
+#CURRENT_MODEL = 'silicon_ds_omni' #deepseek-ai/DeepSeek-R1
+#CURRENT_MODEL = 'silicon_qwen3_80B'
 STRICT_DATE_FILTER = True
 # ========== LLM 调用参数 ==========
 
