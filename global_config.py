@@ -29,7 +29,7 @@ def get_google_api_key():
 GLM4_API_KEY = '4e51ecf7fcae4bed90edf3b9d4a026a7.XdH96shx1QedVUqb'  # 智谱 GLM-4 API Key
 
 # SiliconFlow DeepSeek V3
-SILICONFLOW_API_KEY = 'sk-udszotvrqjgscjpikxgddplbyxatpllkatnkzmsokbrxffkj'
+SILICONFLOW_API_KEY = 'sk-cqwqkyssjumedtwnroiftfxxrcdprobagupblkjgkqbvladc'
 SILICONFLOW_MODEL = 'deepseek-ai/DeepSeek-V3.1-Terminus'#'deepseek-ai/DeepSeek-V3'
 
 # ========== 模型选择 ==========

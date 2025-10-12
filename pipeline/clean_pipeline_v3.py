@@ -723,7 +723,7 @@ def test_illegal():
                 print(res['reason'])
         raise ValueError()
 
-
+import traceback    
 def is_legal_date_batch(date_json: str) -> list:
     prompt = f"""
     当前日期：{datetime.now().strftime('%Y年%m月')}
@@ -806,19 +806,25 @@ def is_legal_date_batch(date_json: str) -> list:
     []
     ```
     """
-    response = model_client.get_completion(prompt)
+
     try:
+        response = model_client.get_completion(prompt)
         response = parse_json_markdown(response)
         return response
-    except:
-        raise ValueError(prompt, response)
+    except Exception as e:
+        print(f"❌ 日期校验LLM响应解析失败: {str(e)}")
+        print(f"原始响应: {response[:500] if response else '无响应'}")
+        raise ValueError(f"日期校验LLM响应解析失败: {traceback.format_exc()}")
+
 
 def check_date_for_df(df: pd.DataFrame):
     df['行号'] = df.index + 2
     data = df[['行号', '日期（必填）']].to_dict(orient='records')
     data = json.dumps(data, ensure_ascii=False, indent=2)
 
+ 
     res = is_legal_date_batch(data)
+
     print('-----------------日期检测返回结果----------------')
     print(res)
     print('---------------------------------------------')

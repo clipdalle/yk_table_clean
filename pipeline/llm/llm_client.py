@@ -8,7 +8,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from global_config import CURRENT_MODEL
+from global_config import CURRENT_MODEL, TIMEOUT
 
 
 # 全局客户端实例（懒加载）

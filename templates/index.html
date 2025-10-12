@@ -592,7 +592,22 @@
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.json())
+            .then(response => {
+                // 先检查响应状态
+                if (!response.ok) {
+                    // 如果不是200系列状态码，尝试解析JSON错误信息
+                    return response.text().then(text => {
+                        try {
+                            const data = JSON.parse(text);
+                            throw new Error(data.error || '处理失败');
+                        } catch (e) {
+                            // 如果不是JSON格式，返回原始文本
+                            throw new Error(text || `服务器错误 (${response.status})`);
+                        }
+                    });
+                }
+                return response.json();
+            })
             .then(data => {
                 loading.style.display = 'none';
                 processBtn.disabled = false;

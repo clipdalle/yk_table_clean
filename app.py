@@ -172,9 +172,14 @@ def upload_files():
         print(f"📊 原始数据行数: {original_rows}")
 
         # 预校验：在正式处理前检查数据质量
-        ahead_result = process_ahead(excel_path, selected_halls)
-        if not ahead_result['valid']:
-            return jsonify({'error': ahead_result['errors']}), 400
+        try:
+            ahead_result = process_ahead(excel_path, selected_halls)
+            if not ahead_result['valid']:
+                return jsonify({'error': ahead_result['errors']}), 400
+        except Exception as e:
+            print(f"⚠️ 预校验失败，跳过预校验步骤: {str(e)}")
+            return jsonify({'error': f'预校验失败: {str(e)}'}), 400
+            # 预校验失败不应阻止整个流程，继续处理
 
         # 使用 func_timeout 实现超时控制
         try:
@@ -243,7 +248,12 @@ def upload_files():
         print(f"❌ 处理失败: {str(e)}")
         print(f"详细错误信息:\n{error_details}")
         
-        return jsonify({'error': f'处理失败: {error_details}'}), 500
+        # 确保返回JSON格式的错误信息
+        return jsonify({
+            'success': False,
+            'error': f'系统错误: {str(e)}',
+            'details': error_details
+        }), 500
 
 @app.route('/download/<filename>')
 def download_file(filename):
