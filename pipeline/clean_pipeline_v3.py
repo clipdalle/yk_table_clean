@@ -817,9 +817,56 @@ def is_legal_date_batch(date_json: str) -> list:
         raise ValueError(f"日期校验LLM响应解析失败: {traceback.format_exc()}")
 
 
+from datetime import datetime, timedelta
+def _convert_single_date(excel_date):
+    """
+    内部函数：转换单个日期值
+    
+    支持多种格式：
+    - YYYYMMDD 格式（如 20250923）-> "2025年9月23日"
+    - Excel 序列号（如 45923）-> "2025年9月24日"
+    - datetime 对象 -> "YYYY年MM月DD日"
+    - 字符串 -> 直接返回
+    
+    Args:
+        excel_date: 日期值（YYYYMMDD数字、Excel序列号、datetime对象或字符串）
+        
+    Returns:
+        中文日期字符串，如 "2025年9月24日"
+    """
+    if excel_date is None:
+        return None
+    
+    # 如果已经是字符串，直接返回
+    if isinstance(excel_date, str):
+        return excel_date
+    
+    # 如果是 datetime 对象，直接格式化
+    if isinstance(excel_date, datetime):
+        date_obj = excel_date
+    # 如果是数字，智能判断是 YYYYMMDD 还是 Excel 序列号
+    elif isinstance(excel_date, (int, float)):
+        # 8位数字（>= 10000000），当作 YYYYMMDD 格式
+        if excel_date >= 10000000:
+            try:
+                date_str = str(int(excel_date))  # 转成字符串，如 "20250923"
+                date_obj = datetime.strptime(date_str, '%Y%m%d')
+            except ValueError:
+                raise ValueError(f"无法解析日期数字 {excel_date}，不是有效的 YYYYMMDD 格式")
+        # 小于8位，当作 Excel 序列号（1899年12月30日起算）
+        else:
+            excel_epoch = datetime(1899, 12, 30)
+            date_obj = excel_epoch + timedelta(days=excel_date)
+    else:
+        return str(excel_date)
+    
+    # 格式化为中文日期，去掉月份和日期前面的 0
+    return date_obj.strftime('%Y年%m月%d日').replace('年0', '年').replace('月0', '月')
+
 def check_date_for_df(df: pd.DataFrame):
     df['行号'] = df.index + 2
     data = df[['行号', '日期（必填）']].to_dict(orient='records')
+
     data = json.dumps(data, ensure_ascii=False, indent=2)
 
  
@@ -847,6 +894,11 @@ def check_date_for_df(df: pd.DataFrame):
     
  
 
+def clean_date(df):
+    df['日期（必填）'] = df['日期（必填）'].apply(lambda x: _convert_single_date(x))
+    return df
+
+
 def process_ahead(excel_path: str, selected_halls: List[str]) -> Dict[str, Any]:
     """
     预校验函数，只校验数据量和日期格式
@@ -862,6 +914,7 @@ def process_ahead(excel_path: str, selected_halls: List[str]) -> Dict[str, Any]:
     # 1. 读取Excel文件
     df = pd.read_excel(excel_path, sheet_name=0)
     columns = df.columns.tolist()
+
     if '日期（必填）' not in columns:
         return {
             'valid': False,
@@ -883,7 +936,8 @@ def process_ahead(excel_path: str, selected_halls: List[str]) -> Dict[str, Any]:
             'errors': ["Excel文件中没有排麦人员（必填）字段"]
         }
         
-    
+    df = clean_date(df)
+    df.to_excel(excel_path, index=False)
 
     # 2. 检查筛选后的数据是否为空
     if not selected_halls or len(selected_halls) == 0:
