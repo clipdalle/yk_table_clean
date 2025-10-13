@@ -861,6 +861,29 @@ def process_ahead(excel_path: str, selected_halls: List[str]) -> Dict[str, Any]:
  
     # 1. 读取Excel文件
     df = pd.read_excel(excel_path, sheet_name=0)
+    columns = df.columns.tolist()
+    if '日期（必填）' not in columns:
+        return {
+            'valid': False,
+            'errors': ["Excel文件中没有日期（必填）字段"]
+        }
+    if '厅号（必填）' not in columns:
+        return {
+            'valid': False,
+            'errors': ["Excel文件中没有厅号（必填）字段"]
+        }
+    if '主持（必填）' not in columns:
+        return {
+            'valid': False,
+            'errors': ["Excel文件中没有主持（必填）字段"]
+        }
+    if '排麦人员（必填）' not in columns:
+        return {
+            'valid': False,
+            'errors': ["Excel文件中没有排麦人员（必填）字段"]
+        }
+        
+    
 
     # 2. 检查筛选后的数据是否为空
     if not selected_halls or len(selected_halls) == 0:

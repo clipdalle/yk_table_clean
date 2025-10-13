@@ -599,8 +599,15 @@
                     return response.text().then(text => {
                         try {
                             const data = JSON.parse(text);
-                            throw new Error(data.error || '处理失败');
+                            // 如果 error 是数组或对象，直接返回数据让后面的 catch 处理
+                            const errorObj = new Error('API Error');
+                            errorObj.apiData = data;
+                            throw errorObj;
                         } catch (e) {
+                            if (e.apiData) {
+                                // 这是我们构造的错误，重新抛出
+                                throw e;
+                            }
                             // 如果不是JSON格式，返回原始文本
                             throw new Error(text || `服务器错误 (${response.status})`);
                         }
@@ -621,7 +628,13 @@
             .catch(error => {
                 loading.style.display = 'none';
                 processBtn.disabled = false;
-                displayError('处理失败: ' + error.message);
+                
+                // 如果是 API 返回的结构化错误
+                if (error.apiData) {
+                    displayError(error.apiData.error, error.apiData.details, error.apiData.type);
+                } else {
+                    displayError('处理失败: ' + error.message);
+                }
             });
         });
         

@@ -8,6 +8,7 @@ import pandas as pd
 import tempfile
 import os
 import sys
+import traceback
 from pathlib import Path
 from func_timeout import func_timeout, FunctionTimedOut
 # Vercel Blob是可选的，生产环境会自动提供
@@ -25,6 +26,8 @@ from pipeline.clean_pipeline_v3 import process_one_file, get_date_str_from_text
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # 用于 session
+app.config['JSON_AS_ASCII'] = False  # 禁用 ASCII 编码，支持中文 JSON 响应
+app.config['JSONIFY_MIMETYPE'] = 'application/json; charset=utf-8'  # 设置 JSON 响应编码
 
 
 # 初始化Vercel Blob
@@ -44,9 +47,20 @@ ALLOWED_EXTENSIONS = {'txt', 'xlsx', 'xls'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+@app.after_request
+def after_request(response):
+    """设置所有响应的编码为 UTF-8"""
+    content_type = response.headers.get('Content-Type', '')
+    if content_type and 'charset' not in content_type:
+        response.headers['Content-Type'] = content_type + '; charset=utf-8'
+    return response
+
+from flask import make_response
 @app.route('/')
 def index():
-    return render_template('index.html')
+    response = make_response(render_template('index.html'))
+    response.headers['Content-Type'] = 'text/html; charset=utf-8'
+    return response
 
 def get_date_from_ui(selected_date):
     """
@@ -177,8 +191,9 @@ def upload_files():
             if not ahead_result['valid']:
                 return jsonify({'error': ahead_result['errors']}), 400
         except Exception as e:
-            print(f"⚠️ 预校验失败，跳过预校验步骤: {str(e)}")
-            return jsonify({'error': f'预校验失败: {str(e)}'}), 400
+            details = traceback.format_exc()
+            print(f"⚠️ 预校验失败，跳过预校验步骤: {traceback.format_exc()}")
+            return jsonify({'error': f'预校验失败: {details}', 'details': details}), 400
             # 预校验失败不应阻止整个流程，继续处理
 
         # 使用 func_timeout 实现超时控制
@@ -236,8 +251,6 @@ def upload_files():
         })
         
     except Exception as e:
-        import traceback
-        import sys
         error_details = traceback.format_exc()
         
         # 强制输出到stderr，确保在Vercel dev中可见
