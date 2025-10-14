@@ -22,6 +22,7 @@ import shutil
 from global_config import STRICT_DATE_FILTER
 # 导入核心业务逻辑
 from pipeline.clean_pipeline_v3 import process_one_file, get_date_str_from_text
+from pipeline.date_helper import convert_excel_date
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'  # 用于 session
@@ -44,9 +45,13 @@ ALLOWED_EXTENSIONS = {'txt', 'xlsx', 'xls'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
+from flask import make_response
 @app.route('/')
 def index():
-    return render_template('index.html')
+    response = make_response(render_template('index.html'))
+    response.headers['Content-Type'] = 'text/html; charset=utf-8'
+    return response
 
 def get_date_from_ui(selected_date):
     """
@@ -104,6 +109,10 @@ def get_names_from_name_file(name_file):
     return known_names
  
 from pipeline.clean_pipeline_v3 import process_ahead
+from pipeline.clean_pipeline_v5 import clean_date
+
+
+
 
 @app.route('/upload', methods=['POST'])
 def upload_files():
@@ -171,8 +180,16 @@ def upload_files():
         original_rows = len(original_df)
         print(f"📊 原始数据行数: {original_rows}")
 
-        # 预校验：在正式处理前检查数据质量
-        ahead_result = process_ahead(excel_path, selected_halls)
+        # 日期清洗：将 Excel 日期序列号转换为中文日期格式
+        print("🔧 正在清洗日期列...")
+        excel_path_cleaned_date = excel_path.replace('.xlsx', '_cleaned_date.xlsx')
+        df_cleaned = clean_date(original_df, selected_halls)
+        df_cleaned.to_excel(excel_path_cleaned_date, index=False)
+        print(f"✅ 日期列清洗完成，保存到: {excel_path_cleaned_date}")        
+ 
+
+        # 预校验：在正式处理前检查数据质量（使用 DataFrame）
+        ahead_result = process_ahead(df_cleaned, selected_halls)
         if not ahead_result['valid']:
             return jsonify({'error': ahead_result['errors']}), 400
 
@@ -182,9 +199,9 @@ def upload_files():
                 timeout_seconds,
                 process_one_file,
                 kwargs={
-                    'excel_path': excel_path,
+                    'excel_path': excel_path_cleaned_date,
                     'output_path': output_path,
-                    'date_str_from_file': date_str_from_ui,
+                    'date_str_from_ui': date_str_from_ui,
                     'strict_date_filter': STRICT_DATE_FILTER,
                     'selected_halls': selected_halls,
                     'known_names_from_ui': known_names_from_ui

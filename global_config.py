@@ -26,18 +26,17 @@ def get_google_api_key():
     return GOOGLE_API_KEY
     return random.choice(TAOBAO_KEYS)
 
-GLM4_API_KEY = '4e51ecf7fcae4bed90edf3b9d4a026a7.XdH96shx1QedVUqb'  # 智谱 GLM-4 API Key
 
 # SiliconFlow DeepSeek V3
-SILICONFLOW_API_KEY = 'sk-udszotvrqjgscjpikxgddplbyxatpllkatnkzmsokbrxffkj'
+SILICONFLOW_API_KEY = 'sk-tslruvlmldahdffvszhsityglgxiqkacywhxdlayeuweyemr'
 SILICONFLOW_MODEL = 'deepseek-ai/DeepSeek-V3.1-Terminus'#'deepseek-ai/DeepSeek-V3'
 
 # ========== 模型选择 ==========
 # 可选值：'gemini' 或 'glm4' 或者 'random_gemini' 或者 "silicon_ds_v3"
 CURRENT_MODEL = 'glm4' #'silicon_ds_v3'  # 当前使用的模型
-CURRENT_MODEL = 'silicon_ds_omni' #deepseek-ai/DeepSeek-R1
-CURRENT_MODEL = 'silicon_qwen3_80B'
-STRICT_DATE_FILTER = True
+#CURRENT_MODEL = 'silicon_ds_omni' #deepseek-ai/DeepSeek-R1
+#CURRENT_MODEL = 'silicon_qwen3_80B'
+STRICT_DATE_FILTER = False
 # ========== LLM 调用参数 ==========
 
 # 温度参数 (0.0 - 1.0)
@@ -58,7 +57,14 @@ BATCH_SIZE = 10
 # 厅号筛选已移至前端页面选择，不再使用全局配置
 
 TIMEOUT = 120
- 
+
+# ========== 灰色关键字配置 ==========
+# 这些关键字在高亮匹配时会被标记为灰色（表示不重要）
+DONT_CARE_WORDS = [
+    '关门', '缺一', '缺二', '缺三', '缺四', '缺五', '缺六', '缺七', '缺八', '缺九', '缺十',
+    '缺1', '缺2', '缺3', '缺4', '缺5', '缺6', '缺7', '缺8', '缺9', '缺10',
+    '满排', '不缺'
+]
 
 COLS_CONFIG = [
     {'col_name':'提交者（自动）', 'col_color':'default'},

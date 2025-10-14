@@ -8,14 +8,15 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from global_config import CURRENT_MODEL
+from global_config import CURRENT_MODEL, SILICONFLOW_API_KEY
+from pipeline.llm.base import BaseLLMClient
 
 
 # 全局客户端实例（懒加载）
 
 
 
-def _get_client(model_name: str = ''):
+def _get_client(model_name: str = '') -> BaseLLMClient:
     """获取 LLM 客户端实例（单例模式）"""
 
     if model_name == 'gemini':
@@ -36,10 +37,10 @@ def _get_client(model_name: str = ''):
     #Qwen/Qwen3-Omni-30B-A3B-Instruct
     elif model_name == 'silicon_ds_omni':
         from .silicon import SiliconModel
-        _client = SiliconModel(model='Qwen/Qwen3-Omni-30B-A3B-Instruct')
+        _client = SiliconModel(model='Qwen/Qwen3-Omni-30B-A3B-Instruct', api_key=SILICONFLOW_API_KEY)
     elif model_name == 'silicon_qwen3_80B':
         from .silicon import SiliconModel
-        _client = SiliconModel(model='Qwen/Qwen3-Next-80B-A3B-Instruct')
+        _client = SiliconModel()
     else:
         raise ValueError(f"未知的模型类型: {model_name}，请在 CONFIG.py 中设置为 'gemini'、'random_gemini'、'glm4' 或 'silicon_ds_v3'")
 
@@ -54,12 +55,13 @@ def get_completion(prompt: str, temperature: float = 0.7, model_name: str = '') 
     Args:
         prompt: 输入的提示词
         temperature: 温度参数，0-1之间
+        model_name: 模型名称
     
     Returns:
         模型返回的文本内容
     """
     client = _get_client(model_name)
-    return client.get_completion(prompt, temperature=temperature, timeout=TIMEOUT)
+    return client.get_completion(prompt, temperature=temperature)
 
 
 if __name__ == '__main__':

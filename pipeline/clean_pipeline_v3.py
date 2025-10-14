@@ -25,9 +25,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.llm.llm_client import _get_client
 from pipeline.prompts_v3 import PROMPT_BATCH
+from pipeline.utils import (normalize_ascii_lower, dedup_names, extract_chinese, 
+                             further_split, parse_json_markdown)
 from global_config import TEMPERATURE, BATCH_SIZE, CURRENT_MODEL, COLS_CONFIG, STRICT_DATE_FILTER 
 
 
+# Excel 配置常量
+DATE_FROM_UI_CELL = 'V1'  # 用户指定日期的单元格位置
+DB_NAME_LIST_DIR = 'name_list'
 
 def get_temp_path(filename):
     temp_dir = tempfile.gettempdir()
@@ -41,17 +46,29 @@ model_client = _get_client(model_name=CURRENT_MODEL)
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
-def parse_batch(batch_df: pd.DataFrame, assist_known_names: List[str]) -> List[Dict]:
+def _parse_single_batch(batch_df: pd.DataFrame, assist_known_names: List[str]) -> List[Dict]:
     """
-    批量解析多行数据（一次 API 调用）
+    内部函数：处理单个批次（一次 LLM 调用）
     
     Args:
         batch_df: 批次数据框
+        assist_known_names: 辅助人名列表
     
     Returns:
         解析结果列表
     """
     # 构建批量输入数据
+    if '行号' not in batch_df.columns:
+        raise ValueError('行号列不存在')
+    if '厅名中文' not in batch_df.columns:
+        raise ValueError('厅名中文列不存在')
+    if '日期（必填）' not in batch_df.columns:
+        raise ValueError('日期（必填）列不存在')
+    if '主持（必填）' not in batch_df.columns:
+        raise ValueError('主持（必填）列不存在')
+    if '排麦人员（必填）' not in batch_df.columns:
+        raise ValueError('排麦人员（必填）列不存在')
+    
     batch_data = []
     for idx, row in batch_df.iterrows():
         batch_data.append({
@@ -68,8 +85,8 @@ def parse_batch(batch_df: pd.DataFrame, assist_known_names: List[str]) -> List[D
         known_names=json.dumps(assist_known_names, ensure_ascii=False, indent=2)
     )
     
+ 
     try:
-        # 调用 LLM
         response = model_client.get_completion(prompt, temperature=TEMPERATURE)
         
         # 清理 markdown 代码块
@@ -84,52 +101,24 @@ def parse_batch(batch_df: pd.DataFrame, assist_known_names: List[str]) -> List[D
         
         # 解析 JSON
         results = json.loads(response)
-        
-        # 验证结果
-        if not isinstance(results, list):
-            raise ValueError("返回结果不是数组")
-        
-        return results
+    except:
+        print(response)
+        traceback.print_exc()
+        raise 
     
-    except Exception as e:
-        # 批量解析失败，返回默认值
-        print(f"\n⚠️ 批量解析失败: {traceback.format_exc()}")
-        print(f"\n原始输入数据:")
-        print(json.dumps(batch_data, ensure_ascii=False, indent=2))
-        print(f"\nLLM 响应:")
-        print(response[:500] if 'response' in locals() else "无响应")
-        
-        return [
-            {
-                "行号": idx,
-                "主持": {
-                    "主持人员列表": []
-                },
-                "排麦": {
-            "排麦人员列表": [],
-            "缺席人数": 0,
-                    "置信度": "low"
-                },
-                "错误": f"批量解析失败: {str(e)[:50]}"
-            }
-            for idx in batch_df.index
-        ]
+    # 验证结果
+    if not isinstance(results, list):
+        raise ValueError("返回结果不是数组")
+    
+    return results
+     
 
-
-def further_split(names: List[str], split_char: str = '-') -> List[str]:
-    res = []
-    for name in names:
-        res.extend(name.split(split_char))
-    return res
- 
-
-def batch_parse_fields(
+def parse_hall_df(
     df: pd.DataFrame, 
-    date_str_from_file: str, 
-    strict_date_filter: bool = False,
     assist_known_names: List[str] = None) -> pd.DataFrame:
     """
-    批量解析排麦人员和主持人员字段（每个 batch：构造输入 -> 调用 LLM -> 解析 -> 直接写回 DataFrame）
+    解析排麦人员和主持人员（自动分批，LLM处理，写回DataFrame）
+    日期匹配和过滤通过后续步骤（公式+灰显）处理
     """
     total = len(df)
     num_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
@@ -146,9 +135,7 @@ def batch_parse_fields(
         '排麦缺席人数_AI解析',
         '排麦置信度_AI解析',
         '标准化日期_AI解析',
-        '日期匹配标志_AI解析',
-        '主持错误_AI解析',
-        '排麦错误_AI解析',
+        '数据日期和用户指定日期是否匹配',
     ]
     for col in target_columns:
         if col not in df.columns:
@@ -165,7 +152,7 @@ def batch_parse_fields(
         print(f"处理批次 {batch_idx + 1}/{num_batches} (第 {start_idx+1}-{end_idx} 行)...", end='')
         batch_start_ts = time.time()
 
-        batch_results = parse_batch(batch_df, assist_known_names=assist_known_names)
+        batch_results = _parse_single_batch(batch_df, assist_known_names=assist_known_names)
             
         # 2) 逐行写回
         for result in batch_results:
@@ -186,14 +173,10 @@ def batch_parse_fields(
             df.at[idx, '排麦缺席人数_AI解析'] = lack_num
             df.at[idx, '排麦置信度_AI解析'] = conf
             df.at[idx, '标准化日期_AI解析'] = row_standard_date_str
-            df.at[idx, '日期匹配标志_AI解析'] = (row_standard_date_str == date_str_from_file)
-            df.at[idx, '主持错误_AI解析'] = error_msg
-            df.at[idx, '排麦错误_AI解析'] = error_msg
-
-            print(row_standard_date_str, date_str_from_file)
 
         elapsed = time.time() - batch_start_ts
         print(f" 完成，用时 {elapsed:.2f}s")
+        time.sleep(1)
 
 
 
@@ -203,16 +186,6 @@ def batch_parse_fields(
 
     total_elapsed = time.time() - total_start_ts
     print(f"\n✅ 解析完成！总用时 {total_elapsed/60:.2f} 分钟（{total_elapsed:.1f} 秒）")
-    
-    # 可选的严格过滤：只保留匹配日期的行（用于统计/导出）
-    if strict_date_filter:
-        before_cnt = len(df)
-        df = df[df['标准化日期_AI解析'] == date_str_from_file]
-
-        # print(date_str_from_file)
-        # df.to_excel('debug.xlsx', index=False)
-        after_cnt = len(df)
-        print(f"📆 严格日期过滤: 仅保留 标准化日期=={date_str_from_file} 的行 {after_cnt}/{before_cnt}")
     
     return df
 
@@ -243,47 +216,109 @@ def save_cleaned_data(df: pd.DataFrame, output_path: str):
     print(f"   - 列已按 CONFIG.COLS_CONFIG 排序")
 
 
-def normalize_ascii_lower(s: str) -> str:
+def apply_gray_fill_for_date_mismatch(excel_path: str):
     """
-    仅将英文字母 A-Z 转为小写，其他字符（含中文）保持不变
+    为日期不匹配的行添加灰色背景（A到S列）
     
     Args:
-        s: 输入字符串
-        
-    Returns:
-        标准化后的字符串
+        excel_path: Excel文件路径
     """
-    if not s:
-        return ''
+    # data_only=True 会读取公式的计算结果而不是公式本身
+    wb = load_workbook(excel_path, data_only=True)
+    ws = wb.active
     
-    # 仅将英文字母 A-Z 转为小写，其他字符（含中文）不变
-    ascii_lower_table = {ord(c): ord(c.lower()) for c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'}
-    return str(s).translate(ascii_lower_table).strip()
+    # 找到"数据日期和用户指定日期是否匹配"列和"标准化日期_AI解析"列
+    headers = [cell.value for cell in ws[1]]
+    match_col_idx = None
+    standard_date_col_idx = None
+    
+    for idx, header in enumerate(headers, 1):
+        if header == '数据日期和用户指定日期是否匹配':
+            match_col_idx = idx
+        elif header == '标准化日期_AI解析':
+            standard_date_col_idx = idx
+    
+    if not match_col_idx or not standard_date_col_idx:
+        wb.close()
+        return
+    
+    # 获取用户指定日期
+    user_date = ws[DATE_FROM_UI_CELL].value
+    
+    # 重新加载工作簿以便写入（data_only模式是只读的计算结果）
+    wb.close()
+    wb = load_workbook(excel_path)
+    ws = wb.active
+    
+    # 创建灰显样式 - 现代灰显主题
+    gray_fill = PatternFill(
+        start_color='F0F0F0',  # 更浅的灰色背景
+        end_color='F0F0F0',
+        fill_type='solid'
+    )
+    
+    # 创建灰色字体样式
+    gray_font = Font(
+        color='808080',  # 深灰色文字
+        size=10          # 稍小的字体（可选，让其更"次要"）
+    )
+    
+    # 遍历数据行（从第2行开始）
+    colored_rows = 0
+    for row_idx in range(2, ws.max_row + 1):
+        # 直接比较标准化日期和用户指定日期
+        standard_date = ws.cell(row=row_idx, column=standard_date_col_idx).value
+        if standard_date != user_date:
+            # 为该行从A列到S列（第1-19列）添加灰显样式
+            for col_idx in range(1, 20):  # S列是第19列
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.fill = gray_fill    # 浅灰背景
+                cell.font = gray_font    # 深灰文字
+            colored_rows += 1
+    
+    wb.save(excel_path)
+    wb.close()
+    print(f"✅ 已为 {colored_rows} 行日期不匹配的数据添加灰色背景（A-S列）") 
 
 
-def dudup_names(names: List[str]) -> List[str]:
+def add_date_match_formulas(excel_path: str, date_str_from_ui: str):
     """
-    去重人名（仅英文大小写不敏感；中文/其他字符保持不变）。
-    - 保留第一次出现的展示名顺序
-    - 规范键：将 A-Z 转小写，其它字符不变
+    在Z列添加日期匹配公式
+    
+    Args:
+        excel_path: Excel文件路径
+        date_str_from_ui: 用户指定的日期字符串
     """
-    from collections import OrderedDict
-
-    if not names:
-        return []
-
-    norm_to_display = OrderedDict()
-    for display in names:
-        if display is None:
-            continue
-        disp = str(display).strip()
-        if not disp:
-            continue
-        norm = normalize_ascii_lower(disp)
-        if norm and norm not in norm_to_display:
-            norm_to_display[norm] = disp
-
-    return list(norm_to_display.values())
+    wb = load_workbook(excel_path)
+    ws = wb.active
+    ws[DATE_FROM_UI_CELL] = date_str_from_ui
+    
+    # 找到标准化日期_AI解析列和数据日期和用户指定日期是否匹配列
+    headers = [cell.value for cell in ws[1]]
+    standard_date_col = None
+    match_col = None
+    
+    for idx, header in enumerate(headers, 1):
+        if header == '标准化日期_AI解析':
+            standard_date_col = get_column_letter(idx)
+        elif header == '数据日期和用户指定日期是否匹配':
+            match_col = get_column_letter(idx)
+    
+    if standard_date_col and match_col:
+        # 为每一行的"数据日期和用户指定日期是否匹配"列添加公式
+        # 使用配置变量 DATE_FROM_UI_CELL 而不是写死的单元格引用
+        # 提取列字母和行号，添加 $ 符号使行号绝对引用
+        date_cell_col = ''.join([c for c in DATE_FROM_UI_CELL if c.isalpha()])
+        date_cell_row = ''.join([c for c in DATE_FROM_UI_CELL if c.isdigit()])
+        date_cell_ref = f'{date_cell_col}${date_cell_row}'  # 如 V$1
+        
+        for row_idx in range(2, ws.max_row + 1):
+            formula = f'=IF({standard_date_col}{row_idx}={date_cell_ref},TRUE,FALSE)'
+            ws[f'{match_col}{row_idx}'] = formula
+    
+    wb.save(excel_path)
+    wb.close()
+    print(f"✅ 已添加日期匹配公式（参考单元格: {DATE_FROM_UI_CELL}），用户指定日期: {date_str_from_ui}")
 
 
 def apply_color_by_value(excel_path, value_color_mapping, output_path=None):
@@ -359,13 +394,15 @@ def apply_color_by_value(excel_path, value_color_mapping, output_path=None):
 
 
 
-def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str, all_known_names: List[str]):
+def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str, all_known_names: List[str], date_str_from_ui: str):
     """
     保存清洗后的数据（带公式版本，统计表在右侧）
     
     Args:
         df: 包含解析结果的数据框
         output_path: 输出文件路径
+        all_known_names: 所有已知人名列表
+        date_str_from_ui: 从UI传入的日期字符串
     """
 
     # 按 COLS_CONFIG 重新排列列
@@ -377,6 +414,10 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str, all_known
     # 保存第一步：清洗后的数据
     path_step1 = output_path.replace('.xlsx', '.step1_clean_table.xlsx')
     df_sorted.to_excel(path_step1, index=False)
+
+
+    add_date_match_formulas(str(path_step1), date_str_from_ui)
+ 
     
     # 加载工作簿
     wb = load_workbook(path_step1)
@@ -419,7 +460,7 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str, all_known
                 all_names.update(names)
         
         # 按字母顺序排序
-        all_names = dudup_names(all_names)
+        all_names = dedup_names(all_names)
         sorted_names = sorted(all_names)
  
         
@@ -448,18 +489,33 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str, all_known
         ws[f'{stats_col_3}1'].font = header_font
         ws[f'{stats_col_3}1'].alignment = Alignment(horizontal='center')
         
+        # 找到"数据日期和用户指定日期是否匹配"列
+        match_col_letter = None
+        for idx, header in enumerate(headers, 1):
+            if header == '数据日期和用户指定日期是否匹配':
+                match_col_letter = get_column_letter(idx)
+                break
+        
         # 填充人名和公式
         for idx, name in enumerate(sorted_names, 2):  # 从第2行开始
             # 人员姓名
             ws[f'{stats_col_1}{idx}'] = name
             
-            # 主持次数（COUNTIF 公式）
-            formula_host = f'=COUNTIF({host_col_letter}:{host_col_letter},"*{name}*")'
-            ws[f'{stats_col_2}{idx}'] = formula_host
-            
-            # 排麦次数（COUNTIF 公式）
-            formula_paimai = f'=COUNTIF({paimai_col_letter}:{paimai_col_letter},"*{name}*")'
-            ws[f'{stats_col_3}{idx}'] = formula_paimai
+            if match_col_letter:
+                # 主持次数（COUNTIFS 公式，只统计日期匹配的行）
+                formula_host = f'=COUNTIFS({host_col_letter}:{host_col_letter},"*{name}*",{match_col_letter}:{match_col_letter},TRUE)'
+                ws[f'{stats_col_2}{idx}'] = formula_host
+                
+                # 排麦次数（COUNTIFS 公式，只统计日期匹配的行）
+                formula_paimai = f'=COUNTIFS({paimai_col_letter}:{paimai_col_letter},"*{name}*",{match_col_letter}:{match_col_letter},TRUE)'
+                ws[f'{stats_col_3}{idx}'] = formula_paimai
+            else:
+                # 如果没有匹配列，使用旧的COUNTIF公式（兼容性）
+                formula_host = f'=COUNTIF({host_col_letter}:{host_col_letter},"*{name}*")'
+                ws[f'{stats_col_2}{idx}'] = formula_host
+                
+                formula_paimai = f'=COUNTIF({paimai_col_letter}:{paimai_col_letter},"*{name}*")'
+                ws[f'{stats_col_3}{idx}'] = formula_paimai
         
         # 设置列宽
         ws.column_dimensions[stats_col_1].width = 20
@@ -486,6 +542,9 @@ def save_cleaned_data_with_formula(df: pd.DataFrame, output_path: str, all_known
             cell_config_list.append({'cell_value': stat_name, 'color_code': 'FF0000','mode': 'contains_value'})
 
     apply_color_by_value(path_step3, cell_config_list, output_path=output_path)
+    
+    # 为日期不匹配的行添加灰色背景
+    apply_gray_fill_for_date_mismatch(output_path)
 
     print(f"✅ 已保存（带公式且着色）: {output_path}")
     print(f"   - 数据列: {len(headers)} 列")
@@ -543,15 +602,15 @@ def extract_chinese(text):
 
 
 
-def get_hall_2_names():
+def get_hall_2_names_from_db():
     hall_2_names = {}
-    for p in Path('name_list').glob('*.txt'):
+    for p in Path(DB_NAME_LIST_DIR).glob('*.txt'):
         with open(p, 'r', encoding='utf-8') as f:
             lines = [line.strip() for line in f.read().splitlines() if line.strip()]
             hall_2_names[p.stem] = lines
     return hall_2_names
 def gen_all_known_names(known_names_from_ui: List[str], selected_halls: List[str]):
-    hall_2_names = get_hall_2_names()
+    hall_2_names = get_hall_2_names_from_db()
     known_names_from_local = []
     for hall in selected_halls:
         known_names_from_local.extend(hall_2_names[hall])
@@ -565,10 +624,15 @@ def gen_all_known_names(known_names_from_ui: List[str], selected_halls: List[str
     return all_names
  
 
+def preprocess_df(df: pd.DataFrame):
+    df['行号'] = df.index + 2
+    df['厅名中文'] = df['厅号（必填）'].apply(extract_chinese)
+    return df
+
 def process_one_file(
         excel_path: str, 
         output_path: str, 
-        date_str_from_file: str, 
+        date_str_from_ui: str, 
         strict_date_filter: bool = False, 
         selected_halls: list = None,
         known_names_from_ui: List[str] = None):
@@ -577,7 +641,7 @@ def process_one_file(
     Args:
         excel_path: 输入 Excel 路径
         output_path: 最终着色文件路径（必填）。
-        date_str_from_file: 日期字符串
+        date_str_from_ui: 日期字符串
         strict_date_filter: 是否严格按日期筛选
         selected_halls: 选择的厅号列表，用于筛选数据
         known_names_from_ui: 从前端上传的已知人名列表
@@ -618,19 +682,20 @@ def process_one_file(
 
     # 2. 批量解析
     print(f"\n🤖 开始 LLM 批量解析...")
-    df_parsed = batch_parse_fields(
+    df_parsed = parse_hall_df(
         df,
-        date_str_from_file=date_str_from_file,
-        strict_date_filter=strict_date_filter,
         assist_known_names=all_known_names
     )
-    
+
     # 3. 生成统计
     generate_statistics(df_parsed)
     
-    # 4. 仅保存带公式版本并生成着色版本（中间产物）
+    # 4. 在Z列添加日期匹配公式
+ 
+    
+    # 5. 仅保存带公式版本并生成着色版本（中间产物）
     print(f"\n📊 保存带公式版本并着色...")
-    save_cleaned_data_with_formula(df_parsed, str(output_path), all_known_names)
+    save_cleaned_data_with_formula(df_parsed, str(output_path), all_known_names, date_str_from_ui)
 
     # 在最终路径上已完成写入与着色
     
@@ -655,73 +720,6 @@ def load_json_from_llm_completion(response_str):
     response = response.strip()
     return json.loads(response)
 
-
-def parse_json_markdown(json_markdown: str) -> str:
-    """从Markdown格式中提取JSON字符串"""
-    #match = re.search(r"```json\s*(.*?)\s*```", json_markdown, re.DOTALL)
-    match = re.search(r"```(json)?(.*)```", json_markdown, re.DOTALL)
-    json_string = match.group(2)
-    return json.loads(json_string)
-
-
-def is_legal_date_str(date_str: str) -> bool:
-    prompt = f"""
-    当前日期：{datetime.now().strftime('%Y年%m月')}
-
-    你是一个日期字符串合法性判断专家。  
-    输入是一个人类手写的日期字符串，可能包含简单笔误但仍可理解为合法日期，或因错误而无法理解为非法日期。  
-
-    **合法日期定义**：  
-    1. 可明确解析为有效日期，即使包含简单笔误，例如：  
-       - "2025年10月  28日" → 可解析为 "2025年10月28日"  
-       - "2025年10.28日" → 可解析为 "2025年10月28日"  
-       - "2025年1028" → 可解析为 "2025年10月28日"  
-       - "20251028" → 可解析为 "2025年10月28日"  
-
-    **非法日期定义**：  
-    1. 日期有歧义，无法明确解析，例如：  
-       - "2025年9223" → 无法判断是9月22日还是9月23日  
-    2. 日期明显无效，例如：  
-       - "2025年13月28日" → 13月不存在  
-    3. 日期超出合理范围（早于2000年或晚于当前年份+3年），例如：  
-       - "1999年10月28日" → 早于2000年  
-       - "2028年10月28日" → 晚于当前年份+3年（{int(datetime.now().strftime('%Y')) + 3}年）  
-
-    **任务**：  
-    判断输入日期字符串 `{date_str}` 是否为合法日期。  
-    返回 JSON 格式结果：  
-    ```json
-    {{
-        "is_legal": true,
-        "reason": "日期字符串是合法的日期字符串"
-    }}
-    ```
-    """
-
-    
-    response = model_client.get_completion(prompt)
-    print(response)
-    response = parse_json_markdown(response)
-    return response
- 
-def test_illegal():
-    dir_path = r'C:\Users\jizai\Documents\xwechat_files\wxid_loq7ea805m2f21_5d13\msg\file\2025-10\daily_data_1006\daily_data_1006'
-    for p in Path(dir_path).glob('*.xlsx'):
-        if 'output' in p.stem:
-            continue
-        df = pd.read_excel(p, sheet_name=0)
-        date_list = df['日期（必填）'].tolist()
-        date_list = list(set(date_list))
-        for date_str in date_list:
-            res = is_legal_date_str(date_str)
-            print(p)
-            print(date_str)
-            print(res)
-            print('----------------------------')
-            if not res['is_legal']:
-                print(date_str)
-                print(res['reason'])
-        raise ValueError()
 
 
 def is_legal_date_batch(date_json: str) -> list:
@@ -814,8 +812,10 @@ def is_legal_date_batch(date_json: str) -> list:
         raise ValueError(prompt, response)
 
 def check_date_for_df(df: pd.DataFrame):
-    df['行号'] = df.index + 2
-    data = df[['行号', '日期（必填）']].to_dict(orient='records')
+    # 将日期列转换为字符串，避免 JSON 序列化问题
+    df_copy = df[['行号', '日期（必填）']].copy()
+    df_copy['日期（必填）'] = df_copy['日期（必填）'].astype(str)
+    data = df_copy.to_dict(orient='records')
     data = json.dumps(data, ensure_ascii=False, indent=2)
 
     res = is_legal_date_batch(data)
@@ -841,20 +841,20 @@ def check_date_for_df(df: pd.DataFrame):
     
  
 
-def process_ahead(excel_path: str, selected_halls: List[str]) -> Dict[str, Any]:
+def process_ahead(df: pd.DataFrame, selected_halls: List[str]) -> Dict[str, Any]:
     """
     预校验函数，只校验数据量和日期格式
 
     Args:
-        excel_path: Excel文件路径
+        df: 输入的 DataFrame
         selected_halls: 选择的厅号列表
 
     Returns:
         Dict: 包含校验结果和错误信息的字典
     """
- 
-    # 1. 读取Excel文件
-    df = pd.read_excel(excel_path, sheet_name=0)
+    # 1. 添加行号（如果没有的话）
+    if '行号' not in df.columns:
+        df['行号'] = df.index + 2
 
     # 2. 检查筛选后的数据是否为空
     if not selected_halls or len(selected_halls) == 0:
@@ -876,6 +876,7 @@ def process_ahead(excel_path: str, selected_halls: List[str]) -> Dict[str, Any]:
     # 3. 校验日期字段
     print('tolist-----------')
     print(df_filtered_by_halls['日期（必填）'].tolist())
+
 
     date_res = check_date_for_df(df_filtered_by_halls)
 
@@ -957,42 +958,13 @@ def get_date_str_from_text(text):
         print(f"日期提取出错: {e}")
         return ''
 
-
-def gen_names():
-    
-    names = []
-    for p in Path(r'F:\vscode_workspace\smart_table\daily_data').glob('*.xlsx'):
-        if 'output' in p.stem:
-            df = pd.read_excel(p, sheet_name=0)
-            for idx, row in df.iterrows():
-                host_list_text = row['主持人员列表_AI解析']
-                paimai_list_text = row['排麦人员列表_AI解析']
-                if host_list_text and paimai_list_text:
-                    # 确保是字符串类型，处理 NaN 等异常值
-                    host_list_text = str(host_list_text) if host_list_text is not None else ''
-                    paimai_list_text = str(paimai_list_text) if paimai_list_text is not None else ''
-                    
-                    host_list = [name.strip() for name in host_list_text.split('|') if name.strip()]
-                    paimai_list = [name.strip() for name in paimai_list_text.split('|') if name.strip()]
-                    for host_name in host_list:
-                        names.extend(host_name.split('-'))
-                    for paimai_name in paimai_list:
-                        names.extend(paimai_name.split('-'))
-    names = list(set(names))
-    # 写入temp目录而不是当前目录
-    import tempfile
-    temp_dir = tempfile.gettempdir()
-    known_names_path = os.path.join(temp_dir, 'known_names_v2.txt')
-    with open(known_names_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(names))
-        
+ 
 
  
 
  
 if __name__ == '__main__':
-    # gen_names()
-    # raise 
+ 
  
     paths = list(Path('daily_data').glob('*.xlsx'))
     for p in paths:
@@ -1004,7 +976,7 @@ if __name__ == '__main__':
         if 'output' in p.stem:
             continue 
 
-        date_str_from_file = get_date_str_from_text(p.stem)
+        date_str_from_ui = get_date_str_from_text(p.stem)
         from global_config import STRICT_DATE_FILTER
-        process_one_file(p, output_path=output_path, date_str_from_file=date_str_from_file, strict_date_filter=STRICT_DATE_FILTER)
+        process_one_file(p, output_path=output_path, date_str_from_ui=date_str_from_ui, strict_date_filter=STRICT_DATE_FILTER)
         time.sleep(1)
